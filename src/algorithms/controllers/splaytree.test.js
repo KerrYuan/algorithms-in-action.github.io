@@ -133,6 +133,35 @@ describe('SplayTree.splay', () => {
   it('returns null for an empty tree', () => {
     expect(SplayTree.splay(null, 10)).toBeNull();
   });
+
+  it('splays the last visited node when searching beyond the maximum key', () => {
+    const root = new Node(40);
+    root.left = new Node(20);
+    root.left.right = new Node(30);
+    root.right = new Node(60);
+    root.right.left = new Node(50);
+    root.right.right = new Node(80);
+    root.right.right.left = new Node(70);
+    const originalKeys = inOrder(root);
+
+    const result = SplayTree.search(root, 90);
+
+    expect(result.key).toBe(80);
+    expect(inOrder(result)).toEqual(originalKeys);
+  });
+
+  it('splays the last visited node when searching below the minimum key', () => {
+    const root = new Node(40);
+    root.left = new Node(20);
+    root.left.left = new Node(10);
+    root.right = new Node(60);
+    const originalKeys = inOrder(root);
+
+    const result = SplayTree.search(root, 5);
+
+    expect(result.key).toBe(10);
+    expect(inOrder(result)).toEqual(originalKeys);
+  });
 });
 
 describe('SplayTree.insert', () => {
@@ -178,6 +207,10 @@ describe('SplayTree.delete', () => {
     expect(SplayTree.delete(null, 10)).toBeNull();
   });
 
+  it('returns null when deleting the only node', () => {
+    expect(SplayTree.delete(new Node(10), 10)).toBeNull();
+  });
+
   it('keeps every key when the target is absent', () => {
     const root = new Node(40);
     root.left = new Node(20);
@@ -200,6 +233,32 @@ describe('SplayTree.delete', () => {
       left: null,
       right: null,
     });
+  });
+
+  it('deletes a non-root leaf after splaying it to the root', () => {
+    const root = new Node(40);
+    root.left = new Node(20);
+    root.right = new Node(60);
+
+    const result = SplayTree.delete(root, 20);
+
+    expect(result.key).toBe(40);
+    expect(result.left).toBeNull();
+    expect(result.right.key).toBe(60);
+    expect(inOrder(result)).toEqual([40, 60]);
+  });
+
+  it('deletes a root with a left subtree and no right subtree', () => {
+    const root = new Node(50);
+    root.left = new Node(30);
+    root.left.left = new Node(20);
+    root.left.right = new Node(40);
+
+    const result = SplayTree.delete(root, 50);
+
+    expect(result.key).toBe(40);
+    expect(result.right).toBeNull();
+    expect(inOrder(result)).toEqual([20, 30, 40]);
   });
 
   it('replaces a deleted root with the maximum of its left subtree', () => {
