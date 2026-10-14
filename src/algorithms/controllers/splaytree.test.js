@@ -593,3 +593,103 @@ describe('SplayTree insertion branch events', () => {
     ]);
   });
 });
+
+describe('SplayTree call observer', () => {
+  it.each([
+    ['LL/LR', [1, 3, 4, 5, 2, 6], 3, ['LL', 'LR', 'E'], [[6, 5, 4], [4, 2, 3], [3]], [null, 5, 2]],
+    ['RR/RL', [6, 4, 3, 2, 5, 1], 4, ['RR', 'RL', 'E'], [[1, 2, 3], [3, 5, 4], [4]], [null, 2, 5]],
+  ])('traces nested %s calls without changing existing events', (_, keys, target, cases, paths, parents) => {
+    const build = () => keys.reduce((root, key) => SplayTree.insert(root, key), null);
+    const originalEvents = [];
+    const expected = SplayTree.search(build(), target, event => originalEvents.push(event));
+    const events = [];
+    const calls = [];
+    const result = SplayTree.search(
+      build(), target, event => events.push(event), call => calls.push(call),
+    );
+    expect(result).toEqual(expected);
+    expect(events).toEqual(originalEvents);
+    expect(calls.map(call => [call.type, call.depth, call.splayCase])).toEqual([
+      ...cases.map((splayCase, index) => ['call-enter', index + 1, splayCase]),
+      ...[...cases].reverse().map((splayCase, index) => ['call-return', 3 - index, splayCase]),
+    ]);
+    const entries = calls.filter(call => call.type === 'call-enter');
+    expect(entries.map(call => call.pathKeys)).toEqual(paths);
+    expect(entries.map(call => call.parentKey)).toEqual(parents);
+    expect(entries.every(call => call.nodeKeys.includes(target))).toBe(true);
+    expect(calls.every(call => call.algorithm === 'splay'
+      && call.operation === 'search' && call.key === target)).toBe(true);
+    expect(calls.filter(call => call.type === 'call-return').map(call => call.rootKey))
+      .toEqual([target, target, target]);
+  });
+
+  it.each([
+    ['LE', 30, 'left', 10],
+    ['RE', 10, 'right', 30],
+  ])('records a missing-grandchild %s call at the supplied depth', (splayCase, rootKey, side, childKey) => {
+    const root = new Node(rootKey);
+    root[side] = new Node(childKey);
+    const calls = [];
+    const events = [];
+    const result = SplayTree.splay(root, 20, event => events.push(event), 99, 4, call => calls.push(call));
+    expect(calls).toEqual([
+      {
+        type: 'call-enter', algorithm: 'splay', operation: 'splay', key: 20,
+        depth: 4, parentKey: 99, rootKey, splayCase,
+        nodeKeys: [rootKey, childKey], pathKeys: [rootKey, childKey],
+      },
+      {
+        type: 'call-return', algorithm: 'splay', operation: 'splay', key: 20,
+        depth: 4, parentKey: 99, rootKey: childKey, splayCase,
+      },
+    ]);
+    expect(result.key).toBe(childKey);
+    expect(events).toHaveLength(1);
+    expect(events[0].bookmark).toBe(`${splayCase}-rot1`);
+  });
+
+  it('distinguishes empty search, empty insertion and duplicate insertion calls', () => {
+    const searchCalls = [];
+    const searchEvents = [];
+    expect(SplayTree.search(null, 0, event => searchEvents.push(event), call => searchCalls.push(call)))
+      .toBeNull();
+    expect(searchEvents).toEqual([]);
+    expect(searchCalls).toEqual([
+      {
+        type: 'call-enter', algorithm: 'splay', operation: 'search', key: 0,
+        depth: 1, parentKey: null, rootKey: null, splayCase: 'E', nodeKeys: [], pathKeys: [],
+      },
+      {
+        type: 'call-return', algorithm: 'splay', operation: 'search', key: 0,
+        depth: 1, parentKey: null, rootKey: null, splayCase: 'E',
+      },
+    ]);
+    const insertCalls = [];
+    const insertEvents = [];
+    const root = SplayTree.insert(null, 0, event => insertEvents.push(event), call => insertCalls.push(call));
+    expect(insertCalls).toEqual([]);
+    expect(SplayTree.insert(root, 0, event => insertEvents.push(event), call => insertCalls.push(call)))
+      .toBe(root);
+    expect(insertCalls.map(call => [call.type, call.operation, call.splayCase]))
+      .toEqual([['call-enter', 'insert', 'E'], ['call-return', 'insert', 'E']]);
+    expect(insertCalls[0].pathKeys).toEqual([0]);
+    expect(insertEvents.map(event => event.action)).toEqual(['empty-tree', 'duplicate']);
+  });
+
+  it('captures zero-key paths and detached subtree arrays before rotations', () => {
+    const root = new Node(4);
+    root.left = new Node(0);
+    root.left.left = new Node(-2);
+    root.left.right = new Node(2);
+    const calls = [];
+    const result = SplayTree.splay(root, 2, null, null, 1, call => calls.push(call));
+    expect(calls[0].nodeKeys).toEqual([4, 0, -2, 2]);
+    expect(calls[0].pathKeys).toEqual([4, 0, 2]);
+    expect(calls.filter(call => call.type === 'call-enter')
+      .every(call => call.pathKeys.length <= 3)).toBe(true);
+    const recorded = JSON.stringify(calls);
+    SplayTree.insert(result, -3);
+    expect(JSON.stringify(calls)).toBe(recorded);
+    expect(calls[0]).not.toHaveProperty('root');
+  });
+});
