@@ -1,13 +1,13 @@
-import SplayTree from './splaytree';
+import { TreeNode, rotateLeft, rotateRight } from './helpers/treeUtils';
 
 // Structural operations are deliberately a small dependency boundary. AVL
 // height rules stay below; shared tree utilities can replace these helpers.
 // newNode(key) returns { key, left: null, right: null }. Rotations mutate child
 // links in place and return the promoted root; they do not maintain heights.
 export const defaultHelpers = Object.freeze({
-  newNode: key => SplayTree.newNode(key),
-  leftRotate: root => SplayTree.leftRotate(root),
-  rightRotate: root => SplayTree.rightRotate(root),
+  newNode: key => new TreeNode(key),
+  leftRotate: rotateLeft,
+  rightRotate: rotateRight,
 });
 
 function cloneValue(value) {

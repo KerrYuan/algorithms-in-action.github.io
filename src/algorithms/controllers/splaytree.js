@@ -17,13 +17,12 @@
  * behaviour remains independently testable.
  */
 
-export class Node {
-  constructor(key) {
-    this.key = key;
-    this.left = null;
-    this.right = null;
-  }
-}
+import {
+  TreeNode as Node, rotateLeft, rotateRight, collectSubtreeKeys, getTreePath,
+} from './helpers/treeUtils';
+
+// Preserve the public Splay node constructor while sharing its representation.
+export { Node };
 
 // Call tracing is separate from the existing rotation/insertion event stream.
 // Only keys are exposed, captured before the call mutates its subtree.
@@ -40,23 +39,8 @@ function reportCall(onCall, type, root, key, parentKey, depth, splayCase) {
     splayCase,
   };
   if (type === 'call-enter') {
-    const nodeKeys = [];
-    const visit = node => {
-      if (node === null) return;
-      nodeKeys.push(node.key);
-      visit(node.left);
-      visit(node.right);
-    };
-    visit(root);
-    const pathKeys = [];
-    let current = root;
-    while (current !== null && pathKeys.length < 3) {
-      pathKeys.push(current.key);
-      if (current.key === key) break;
-      current = key < current.key ? current.left : current.right;
-    }
-    call.nodeKeys = nodeKeys;
-    call.pathKeys = pathKeys;
+    call.nodeKeys = collectSubtreeKeys(root);
+    call.pathKeys = getTreePath(root, key).slice(0, 3);
   }
   onCall(call);
 }
@@ -79,17 +63,11 @@ class SplayTree {
   }
 
   static rightRotate(root) {
-    const newRoot = root.left;
-    root.left = newRoot.right;
-    newRoot.right = root;
-    return newRoot;
+    return rotateRight(root);
   }
 
   static leftRotate(root) {
-    const newRoot = root.right;
-    root.right = newRoot.left;
-    newRoot.left = root;
-    return newRoot;
+    return rotateLeft(root);
   }
 
   static rightRotateWithEvent(root, onEvent, eventDetails) {

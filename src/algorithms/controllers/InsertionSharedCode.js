@@ -36,6 +36,9 @@ import Array1DTracer from '../../components/DataStructures/Array/Array1DTracer';
 import { areExpanded } from './collapseChunkPlugin';
 import SplayTree from './splaytree';
 import { insertTree, searchTree } from './treeAlgorithms';
+import {
+    TreeNode, traversePreOrder, fromFlatTree, createTreeSnapshot, getTreePath,
+} from './helpers/treeUtils';
 
 // Moving to new color scheme
 // XXX Currently code is a bit shit  due to previous use of older color
@@ -43,14 +46,9 @@ import { insertTree, searchTree } from './treeAlgorithms';
 import {BSTColors as colors} from './BSTColors';
 
 // remove any highlighting etc from tree XXX also in AVLTreeSearch.js
-let uncolor = (graph, root) => {
-  if (root) {
-    // console.log(root, root.key, root.left, root.right);
-    graph.setNodeColor(root.key, undefined);
-    uncolor(graph, root.left);
-    uncolor(graph, root.right);
-  }
-}
+const uncolor = (graph, root) => {
+    traversePreOrder(root, node => graph.setNodeColor(node.key, undefined));
+};
 
 
 // Global flag for insert/search (set when controller init is run)
@@ -65,35 +63,11 @@ function isRecursionExpanded(inserting = isInsert) {
 
 let globalRoot;
 let isAVL = false; // flag for AVLT/BST (needed for height)
-// Tree Node class
-class TreeNode {
-	constructor(key) {
-	this.key = key;
-	this.left = null;
-	this.right = null;
-	if (isAVL) {
-		this.height = 1;
-	}
-    }
-}
-
-// For search, we extract the tree from the visualiser as a flat mapping
-// (associative array) between keys and (keys of roots of) children (if they
-// exist/are defined), and separately extract the root. This is (probably)
-// the representation used in the initial BST coding and doesn't allow
-// duplicate keys (if we change our mind about allowing duplicate keys is
-// might be a significant rewrite): It is not the representation used in
-// AVL trees and the recursive BST implementation for search, so we need
-// to convert the flat representation to the nested/recursive one.
-function treeFromFlatTree(root, flatTree) {
-    if (flatTree[root.key].left) {
-        root.left = new TreeNode(flatTree[root.key].left);
-        treeFromFlatTree(root.left, flatTree);
-    }
-    if (flatTree[root.key].right) {
-        root.right = new TreeNode(flatTree[root.key].right);
-        treeFromFlatTree(root.right, flatTree);
-    }
+// Algorithm-specific metadata stays here, outside the shared structural helpers.
+function createAlgorithmNode(key) {
+    const node = new TreeNode(key);
+    if (isAVL) node.height = 1;
+    return node;
 }
 
 // XXX popAfterReturnFlag seems to be used in a dodgy way, being set
@@ -535,7 +509,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                 vis.graph.setNodeColor(rr, undefined);
                 popAfterReturnFlag = false;
             }
-            if (rr) {
+            if (rr !== null && rr !== undefined) {
                 // visit from root to root, to just highlight the current node, without highlighting the edge
                 // graph_visit(vis.graph, rr, rr);
                 vis.graph.setNodeColor(rr, colors.PATH_N);
@@ -549,7 +523,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
             
             // Only add rectangles when recursion is expanded
             if (isRecursionExpanded(isInsert)) {
-                if (rr) {
+                if (rr !== null && rr !== undefined) {
                     let nodeIds = vis.graph.getSubtreeNodes(rr);
                     vis.graph.pushRectStack(nodeIds, `Depth ${d}`);
                 }
@@ -929,53 +903,11 @@ function insertOrSearch(chunker, root, key, currIndex, { avl = false, operation 
 
 
 
-// Create a snapshot of the splay tree for transitioning between
-// states in the visualisation. This function collects the keys of all nodes and
-// the edges between them, as well as the key of the root node.
-function createSplaySnapshot(root) {
-    const nodeKeys = [];
-    const edges = [];
-
-    function visit(node) {
-        if (node === null) return;
-
-        nodeKeys.push(node.key);
-
-        if (node.left !== null) {
-            edges.push([node.key, node.left.key]);
-        }
-
-        if (node.right !== null) {
-            edges.push([node.key, node.right.key]);
-        }
-
-        visit(node.left);
-        visit(node.right);
-    }
-    visit(root);
-
-    return {
-        nodeKeys,
-        edges,
-        rootKey: root.key,
-    };
-}
-
 // Get the path from the root to a specific key in the splay tree
 // This function traverses the tree and
 // records the keys of the nodes along the path to the target key.
 export function getSplayTreePath(root, key) {
-    const path = [];
-    let current = root;
-
-    while (current !== null) {
-        path.push(current.key);
-        if (key === current.key) {
-            break;
-        }
-        current = key < current.key ? current.left : current.right;
-    }
-    return path;
+    return getTreePath(root, key);
 }
 
 // Map actual algorithm call entries to the existing animation frame format.
@@ -1620,7 +1552,7 @@ function addSplaySearchSnapshotChunk(chunker, root, target) {
         nodeKeys,
         edges,
         rootKey,
-    } = createSplaySnapshot(root);
+    } = createTreeSnapshot(root);
     const found = rootKey === target;
 
     chunker.add(
@@ -1824,7 +1756,7 @@ export function createTreeInsertionController(isAVLp = false) {
                         nodeKeys,
                         edges,
                         rootKey,
-                    } = createSplaySnapshot(root);
+                    } = createTreeSnapshot(root);
 
                     chunker.add(insertionEvent.action === 'empty-tree' ? 'insert-return-empty' : 'insert-return', (vis, snapshotRoot, insertedKey, insertion) => {
                         const graph = vis.graph;
@@ -1985,8 +1917,7 @@ export function createTreeSearchController(isAVLp = false) {
             const flatTree = visualiser.graph.instance.getTree();
             let rootKey = visualiser.graph.instance.getRoot();
 
-            globalRoot = new TreeNode(rootKey);
-            treeFromFlatTree(globalRoot, flatTree);
+            globalRoot = fromFlatTree(rootKey, flatTree, createAlgorithmNode);
 
             let current = rootKey;
             let parent = null;
