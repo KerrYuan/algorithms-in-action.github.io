@@ -51,6 +51,8 @@ console.log(tree);
             vis.graph.popAllRectStack();
             vis.graph.setFunctionInsertText("(t, " + target + ")");
             vis.graph.setFunctionName("AVL_Search");
+            //vis.graph.layoutBST(rootKey, true);
+
             vis.graph.visit(c, p);
         }, [current, parent]);
         if (!tree)
@@ -72,6 +74,7 @@ console.log(tree);
                 chunker.add('return t', (vis, c, p) => {
                     vis.graph.leave(c, p);
                     vis.graph.select(c, p);
+                    //vis.graph.layoutBST(root, true);
                     vis.graph.setText('Key found');
                 }, [node, parent]);
                 return 'success';

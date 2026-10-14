@@ -1097,6 +1097,7 @@ function insertOrSearch(chunker, root, key, currIndex) {
         }
         vis.graph.setNodeColor(k, undefined);
         vis.graph.setNodeColor(r, undefined);
+        // vis.graph.layoutBST(currentRootKey, true);
         // vis.graph.setFunctionName(`Search: ${target}`);
         // vis.graph.setFunctionInsertText();
     }, [key, root.key], 1);
@@ -1195,6 +1196,8 @@ export function createTreeInsertionController(isAVLp = false) {
             chunker.add('return n',
                 (vis, k) => {
                     vis.graph.addNode(k, k);
+                    // vis.graph.layoutBST(root, true);
+
                     if (isAVL) {
                         vis.graph.updateHeight(k, 1);
                     }
