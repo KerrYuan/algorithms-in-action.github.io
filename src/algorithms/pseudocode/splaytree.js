@@ -25,23 +25,23 @@ as possible with BST/AVL trees
 Main
 ST_Insert(t, k) // insert key k into tree t; return result \\B Main
 \\In{
-  if t = Empty
+  if t = Empty \\B insert-test-empty
   \\In{
-    Return a single-node tree containing k
+    Return a single-node tree containing k \\B insert-return-empty
   \\In}
   Move the node closest to k to the root \\Ref insert_splay
-  if k > t.key
+  if k > t.key \\B insert-test-right
   \\In{
     Insert k above and right of the root \\Ref insert_right
   \\In}
-  else if k < t.key
+  else if k < t.key \\B insert-test-left
   \\In{
     Insert k above and left of the root \\Ref insert_left
   \\In}
-  // else if k = t.key ignore insertion
+  // else if k = t.key ignore insertion \\B insert-duplicate
   \\Expl{ Duplicate keys are not supported and k is in t already.
   \\Expl}
-  return t
+  return t \\B insert-return
 \\In}
 //==============================================================
 ST_Search(t, k) // return node containing k or NotFound  \\B 1
@@ -49,15 +49,15 @@ ST_Search(t, k) // return node containing k or NotFound  \\B 1
   Move the node closest to k to the root \\Ref search_splay
   if t != Empty and t.key = k
   \\In{
-    return t
+    return t \\B search-return-found
   \\In}
   else
   \\In{
-    return NotFound
+    return NotFound \\B search-return-not-found
   \\In}
 \\In}
 //==============================================================
-splay(t, k) // Move node k to root of t
+splay(t, k) // Move node k to root of t \\B splay-enter
 // Note: "node k" means the node closest to k
 \\Expl{ Returns a tree with the same nodes as t, rearranged.
   The root will be the node containing key k
@@ -108,13 +108,13 @@ splay(t, k) // Move node k to root of t
       Node k is in the right subtree of the right subtree.
     \\Expl}
     \\In{
-        Move node k to the top of the right-right subtree \\Ref LL-recurse
-        t <- leftRotate(t) // Move node k to the right of the root \\B LL-rot1
+        Move node k to the top of the right-right subtree \\Ref RR-recurse
+        t <- leftRotate(t) // Move node k to the right of the root \\B RR-rot1
         \\Expl{
           This moves the whole right-right subtree (with k at the top, assuming
           k exists in the tree) up so it becomes the (new) right subtree.
         \\Expl}
-        return leftRotate(t) // Move node k to root \\B LL-rot2
+        return leftRotate(t) // Move node k to root \\B RR-rot2
         \\Expl}
     \\In}
     case Right-Left:// Right-Left path \\B right-left
@@ -122,13 +122,13 @@ splay(t, k) // Move node k to root of t
       Node k is in the left subtree of the right subtree.
     \\Expl}
     \\In{
-        Move node k to the top of the right-left subtree \\Ref LR-recurse
-        t.right <- rightRotate(t.right) // Move node k to the right of the root \\B LR-rot1
+        Move node k to the top of the right-left subtree \\Ref RL-recurse
+        t.right <- rightRotate(t.right) // Move node k to the right of the root \\B RL-rot1
         \\Expl{
           This moves the whole right-left node (containing k, assuming
           k exists in the tree) up so it becomes the (new) right subtree.
         \\Expl}
-        return leftRotate(t) // Move node k to root \\B LR-rot2
+        return leftRotate(t) // Move node k to root \\B RL-rot2
     \\In}
     case Left-Empty:// Left (and no further) \\B left-empty
     \\Expl{
@@ -182,6 +182,52 @@ for diagrams etc explaining rotations.
     t6.left <- t4 // may be Empty \\B t6.left = t4
     return (pointer to) t2 // new root \\B return t2
   \\In} 
+//==== Deletion ================================================
+ST_Delete(t, k) // delete key k from tree t; return result \\B Del
+\\Expl{ If k doesn't appear in t, no elements are removed, but the tree
+    returned will be a rearranged version of t (with the key next higher or
+    lower than k splayed to the root).
+\\Expl}
+\\In{
+  if t = Empty \\B Del_t_Empty
+  \\In{
+    return t \\B Del_return1
+  \\In}
+  Move the node closest to k to the root \\Ref DelSplay1
+  if t.key != k \\B Del_not_found
+  \\Expl{ The previous step moves k to the root if it exists in
+    the tree, so if t.key != k it means k doesn't exist in t and we
+    have nothing further to do.
+  \\Expl}
+  \\In{
+    return t // k is not in t \\B Del_return2
+  \\In}
+  if t.left = Empty \\B Del_left_empty
+  \\In{
+    return t.right // return t minus the root \\B Del_return3
+  \\In}
+  temp <- t.right \\B Del_init_temp
+  t <- t.left with maximum key moved to root \\Ref DelSplay2
+  t.right <- temp \\B Del_use_temp
+  \\Expl{ We add the previous right subtree so the tree now contains
+    all previous elements except k.
+  \\Expl}
+  return t \\B Del_return4
+\\In}
+\\Code}
+
+\\Code{
+DelSplay1
+  t <- splay(t, k) // move k to the root (if found) \\B Del_splay1
+\\Code}
+
+\\Code{
+DelSplay2
+  t <- splay(t.left, k) // max left key -> root \\B Del_splay2
+  \\Expl{ We splay t.left with key (or anything larger) to bring the
+    largest element of t.left up to the root; the right subtree must
+    therefore be empty.
+  \\Expl}
 \\Code}
 
 \\Code{
@@ -200,7 +246,8 @@ t <- new node with k and subtrees l and r
 
 \\Code{
 insert_splay
-t <- splay(t, k)
+// Call splay to move the node closest to k to the root \\B pre-insert-splay
+t <- splay(t, k) \\B insert-splay-call
 \\Expl{
 The splay operation does most of the work. It will update t so the root
 will be the node containing k, if such a node exists, otherwise it will
@@ -211,7 +258,8 @@ is just returned.
 
 \\Code{
 search_splay
-t <- splay(t, k)
+// Call splay to move the node closest to k to the root \\B pre-search-splay
+t <- splay(t, k) \\B search-splay-call
 \\Expl{
 The splay operation does most of the work. It will update t so the root
 will be the node containing k, if such a node exists.

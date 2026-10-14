@@ -1228,6 +1228,9 @@ class GraphTracer extends Tracer {
    */
   clearTID() {
     this.nodes.forEach(node => {
+      if (typeof node.height === 'string') {
+        node.height = undefined;
+      }
       node.AVL_TID = undefined;
     });
   }
