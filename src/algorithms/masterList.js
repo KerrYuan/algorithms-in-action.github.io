@@ -583,7 +583,7 @@ const algorithmMetadata = {
 "splaytree": {
     "name": "Splay Tree",
     "category": "Insert/Search",
-    "noDeploy": true,
+    "noDeploy": false,
     "keywords": [
       "BST",
       "binary",
@@ -594,10 +594,12 @@ const algorithmMetadata = {
       "amortised"
     ],
     "controller": {
+      "operations": "splaytreeInsertion",
       "insertion": "splaytreeInsertion",
       "search": "splaytreeSearch"
     },
     "pseudocode": {
+      "operations": "splaytree",
       "insertion": "splaytreeInsertion",
       "search": "splaytreeSearch"
     },
@@ -610,7 +612,7 @@ const algorithmMetadata = {
 	"dst": {
     "name": "Digital Search Tree",
     "category": "Insert/Search",
-    "noDeploy": true,
+    "noDeploy": false,
     "keywords": [
       "radix",
       "binary",

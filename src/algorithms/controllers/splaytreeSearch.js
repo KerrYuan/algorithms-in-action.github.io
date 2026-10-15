@@ -1,17 +1,13 @@
 /**
- * This file contains the AVL Tree Search algorithm,
- * alongside the visualisation code.
+ * Splay Tree Search controller.
  *
- * XXX needs a bunch more fixes. Best ignore height and balance, highlight
- * nodes at the right points (done), improve display of t if possible,...
- *
- * The AVL Tree Search algorithm is used to find a node.
- * 
- * The search algorithm is based on the tree created by the insertion algorithm. 
- * By accessing the visualized AVL tree, it retrieves the complete tree structure. 
- * The input is a node to be searched for, and the algorithm starts from the root, 
- * traversing down to the child nodes to find the target node.
+ * This controller uses the pure `SplayTree` data-structure (no visual code)
+ * to perform a splay on the accessed key and then updates the visualiser
+ * to reflect the new tree (accessed node moved to root).
  */
+
+import SplayTree from './splaytree';
+import { addSplayRotationChunks, getSplayTreePath } from './InsertionSharedCode';
 
 export default {
     /**
@@ -37,72 +33,101 @@ export default {
      * @param {number} target
      */
     run(chunker, { visualiser, target }) {
-        // get whole tree
-        const tree = visualiser.graph.instance.getTree();
-        let root = visualiser.graph.instance.getRoot();
-console.log(tree);
+        // get whole (flat) tree and root id from the visualiser
+        const flatTree = visualiser.graph.instance.getTree();
+        const rootId = visualiser.graph.instance.getRoot();
 
-        let current = root;
-        let parent = null;
-
-        chunker.add('AVL_Search(t, k)', (vis, c, p) => {
-            vis.graph.setZoom(0.55);
-            // Remove all the recursion rectangles first
-            vis.graph.popAllRectStack();
-            vis.graph.setFunctionInsertText("(t, " + target + ")");
-            vis.graph.setFunctionName("AVL_Search");
-            vis.graph.visit(c, p);
-        }, [current, parent]);
-        if (!tree)
-            chunker.add('while t not Empty');
-
-        let ptr = tree;
-        parent = current;
-
-        /* eslint-disable no-constant-condition */
-        while (true) {
-            chunker.add('while t not Empty');
-
-            if (current === undefined || !ptr) // should use null
-                break;
-
-            let node = current;
-            chunker.add('if n.key = k');
-            if (node === target) {
-                chunker.add('return t', (vis, c, p) => {
-                    vis.graph.leave(c, p);
-                    vis.graph.select(c, p);
-                    vis.graph.setText('Key found');
-                }, [node, parent]);
-                return 'success';
-            }
-
-            chunker.add('if n.key > k');
-            if (target < node) {
-                parent = node;
-                current = tree[node].left;
-                ptr = tree[node];
-                if (current !== undefined) {
-
-                    chunker.add('t <- n.left', (vis, c, p) => vis.graph.visit(c, p), [current, parent]);
-                } else {
-                    chunker.add('t <- n.left', (vis) => vis.graph.setText('t = Empty'));
-                }
-            } else {
-                parent = node;
-                current = tree[node].right;
-                ptr = tree[node];
-                // if current node has right child
-                if (current !== undefined) {
-                    chunker.add('t <- n.right', (vis, c, p) => vis.graph.visit(c, p), [current, parent]);
-                } else {
-                    chunker.add('t <- n.right', (vis) => vis.graph.setText('t = Empty'));
-                }
-            }
+        // helper: build a nested SplayTree Node structure from the flat tree
+        function buildNested(id) {
+            if (id === undefined || id === null) return null;
+            const node = SplayTree.newNode(id);
+            const entry = flatTree[id] || {};
+            if (entry.left) node.left = buildNested(entry.left);
+            if (entry.right) node.right = buildNested(entry.right);
+            return node;
         }
 
-        chunker.add('return NotFound', (vis) => vis.graph.setText('Key not found'));
+        const nestedRoot = buildNested(rootId);
+        const searchPath = getSplayTreePath(nestedRoot, target);
+
+        searchPath.forEach((nodeKey, index) => {
+            const parentKey = index === 0 ? null : searchPath[index - 1];
+
+            chunker.add(
+                'switchPath',
+                (vis, currentKey, previousKey, searchedKey) => {
+                    const graph = vis.graph;
+                    graph.setFunctionName(`Search: ${searchedKey}`);
+
+                    if (previousKey !== null) {
+                        graph.setNodeColor(previousKey, '#A9D6FF');
+                        graph.setEdgeColor(previousKey, currentKey, '#A9D6FF');
+                    }
+                    graph.setNodeColor(currentKey, '#A9D6FF');
+                },
+                [nodeKey, parentKey, target],
+                1,
+            );
+        });
+
+        chunker.add('Splay_Search(t, k)', (vis) => {
+            vis.graph.setZoom(0.55);
+            vis.graph.popAllRectStack();
+            vis.graph.setFunctionInsertText(`(t, ${target})`);
+            vis.graph.setFunctionName('Splay_Search');
+        }, [rootId]);
+
+        const algorithmEvents = [];
+        // perform the splay (this moves the accessed node, or the last accessed
+        // node while searching, to the root)
+        const newRoot = SplayTree.search(nestedRoot, target, event => {
+            if (event.type === 'rotation') {
+                algorithmEvents.push(event);
+            }
+        });
+
+        addSplayRotationChunks(chunker, algorithmEvents, 'search', rootId);
+
+        // convert nested tree back into flat edges on the visualiser
+        const g = visualiser.graph.instance;
+        // remove all existing edges
+        const oldEdges = g.edges ? [...g.edges] : [];
+        oldEdges.forEach(e => g.removeEdge(e.source, e.target));
+
+        // traverse nested tree and add edges
+        function addEdges(node) {
+            if (!node) return;
+            if (node.left) {
+                g.addEdge(node.key, node.left.key);
+                addEdges(node.left);
+            }
+            if (node.right) {
+                g.addEdge(node.key, node.right.key);
+                addEdges(node.right);
+            }
+        }
+        if (newRoot) addEdges(newRoot);
+
+        // layout the tree with the new root
+        if (newRoot) {
+            g.layoutTree(newRoot.key);
+            g.directed(true);
+            g.layout();
+        }
+
+        // set message and return status based on whether target reached root
+        if (newRoot && newRoot.key === target) {
+            chunker.add('return t', (vis) => {
+                if (vis.graph.clearTID) vis.graph.clearTID();
+                vis.graph.setText('Key found');
+            });
+            return 'success';
+        }
+
+        chunker.add('return NotFound', (vis) => {
+            if (vis.graph.clearTID) vis.graph.clearTID();
+            vis.graph.setText('Key not found');
+        });
         return 'fail';
     },
 };
-
