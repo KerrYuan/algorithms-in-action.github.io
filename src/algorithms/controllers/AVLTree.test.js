@@ -14,6 +14,10 @@ const chunker = {
 };
 
 describe('AVLTreeInsertion', () => {
+  beforeEach(() => {
+    AVLTreeInsertion.initVisualisers({ visualiser: {} });
+  });
+
   // Simple rotation: only envolves one rotate. 
   // The detailed test cases are as follows:
   it('[Simple] No rotation', () => {
