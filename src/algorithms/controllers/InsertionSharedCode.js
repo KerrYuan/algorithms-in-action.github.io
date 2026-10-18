@@ -39,6 +39,9 @@ import { insertTree, searchTree } from './treeAlgorithms';
 import {
     TreeNode, traversePreOrder, fromFlatTree, createTreeSnapshot, getTreePath,
 } from './helpers/treeUtils';
+import { getRotationBookmarks, startRotationMovement, advanceRotationMovement, detachRotationEdges, attachRotationTransfer, reconnectRotationParent, finishRotationLayout } from './helpers/rotationAnimationHelpers';
+
+import { clearTreeHighlights, highlightTreePath, centerRotatedRoot, lowerRotatedPivot, showTreeOperation, pushTreeDepthBox, trimTreeDepthBoxes, clearTreePointerLabels } from './helpers/treeOperationHelpers';
 
 // Moving to new color scheme
 // XXX Currently code is a bit shit  due to previous use of older color
@@ -124,54 +127,10 @@ let graph_clear = (graph) => {
   rotEdges = [];
 };
 
-/**
-* compute node positions during rotation
-* given x-y coordinates of the root and the child, compute the
-* intermediate position after step 1, step 2, ...
-* coords represented as record with fields rX, rY, cX, cY (root X&Y,
-* child X&Y)
-* Steps 1&2:
-* We keep the edge the same length and rotate it around the point 40%
-* along the edge from the root.  If initially the y coordinate of the
-* root is 1 and the child is zero, after step 1 the root is at 2/3
-* and the child is at 1/2 and after step 2 the root is at 1/3 and the
-* child is at 1.  The x coordinates are computed so as to keep the length
-* of the edge same (magic numbers derived from maths).
-* returns record with new coordinates
-* Further steps:
-* Not coded here but in the next steps the (new) root is moved
-* more towards the center and the (new) child (and it's child?)
-* is moved down.
-* (AVL only)
-*/
-function rotateStep(pos0, step) {
-        let {rX, rY, cX, cY} = pos0;
-        let deltaX = rX - cX;
-        let deltaY = rY - cY;
-        // edge length = sqrt(deltaX**2 + deltaY**2)
-        let deltaX1; // deltaX for new position
-        let pos1 = {rX:0, rY:0, cX:0, cY:0};
-        if (step === 1) {
-            pos1.rY = (2*rY + cY) / 3;
-            pos1.cY = (rY + cY) / 2;
-            deltaX1 = Math.sqrt((35/36)*deltaY**2 + deltaX**2);
-        } else if (step === 2) {
-            pos1.rY = (rY + 2*cY) / 3;
-            pos1.cY = rY;
-            deltaX1 = Math.sqrt((5/9)*deltaY**2 + deltaX**2);
-        } else {
-            console.log('Invalid rotateStep step ', step);
-        }
-        if (rX > cX) // reverse direction of deltaX
-            deltaX1 = -deltaX1;
-        pos1.rX = (0.6*rX + 0.4*cX) - 0.4*deltaX1;
-        pos1.cX = (0.6*rX + 0.4*cX) + 0.6*deltaX1;
-        return pos1;
-    }
-
 // Translate one completed structural rotation into the existing visual stages.
 // Snapshots describe the old/new trees; this adapter never changes child pointers.
 function addAVLRightRotationChunks(chunker, event) {
+    const bookmarks = getRotationBookmarks('right');
     const root = event.rootBefore;
     const temp = event.rootAfter;
     const pivotAfter = temp.right;
@@ -184,7 +143,7 @@ function addAVLRightRotationChunks(chunker, event) {
     const D = A.right;
     const RR = root.right ? root.right.key : null;
     // assign the root as t6 in the pseudocode
-    chunker.add('rightRotate(t6)',
+    chunker.add(bookmarks.enter,
             (vis, r, rl, rll) => {
                 graph_clear(vis.graph);
                 // vis.graph.clearSelect_Circle_Count();
@@ -201,28 +160,17 @@ function addAVLRightRotationChunks(chunker, event) {
         );
 
     // assign the left child of the root as t2 in the pseudocode
-    chunker.add('t2 = left(t6)',
+    chunker.add(bookmarks.identifyNewRoot,
             (vis, tt2, tt6) => {
-                // show tid of t2 on the graph
                 vis.graph.updateTID(tt2, 't2');
-    
-                // -- following code is for visualising the rotation step by step --
-                // find the position of the nodes in the graph
-                let rootNode = vis.graph.findNode(tt6);
-                let leafNode = vis.graph.findNode(tt2);
-                // store the previous height of the root node
-                let pos0 = {rX:rootNode.x, rY:rootNode.y, cX:leafNode.x, cY:leafNode.y};
-                vis.graph.setRotPos(pos0);
-                let pos = rotateStep(pos0, 1); // compute new position
-                vis.graph.setNodePosition(tt6, pos.rX, pos.rY);
-                vis.graph.setNodePosition(tt2, pos.cX, pos.cY);
+                startRotationMovement(vis.graph, tt6, tt2);
             },
             [A.key, R.key],
             depth
         );
 
     // assign the right child of t2 as t4 in the pseudocode
-    chunker.add('t4 = right(t2)',
+    chunker.add(bookmarks.identifyTransfer,
             (vis, tt6, tt2, tt4) => {
                 // show tid of t4 on the graph
                 if (tt4) {
@@ -234,25 +182,17 @@ function addAVLRightRotationChunks(chunker, event) {
     
                 // -- following code is for visualising the rotation step by step --
                 // freeze the layout to avoid the nodes moving automatically
-                vis.graph.setPauseLayout(true);
-                let pos0 = vis.graph.getRotPos(); // original position
-                let pos = rotateStep(pos0, 2); // compute new position
-                vis.graph.setNodePosition(tt6, pos.rX, pos.rY);
-                vis.graph.setNodePosition(tt2, pos.cX, pos.cY);
+                advanceRotationMovement(vis.graph, tt6, tt2, { pauseLayout: true });
             },
             [R.key, A.key, D ? D.key : false],
             depth
         );
 
     // let t2's right child point to t6
-    chunker.add('t2.right = t6',
+    chunker.add(bookmarks.linkPivot,
             (vis, t6, t2, t4, p, rotate) => {
                 graph_reset(vis.graph, t2, t6);
-                vis.graph.removeEdge(t6, t2);
-    
-                if (t4 !== null) {
-                    vis.graph.removeEdge(t2, t4);
-                }
+                detachRotationEdges(vis.graph, t6, t2, t4);
     
                 if (rotate) graph_reset(vis.graph, t6, null);
     
@@ -264,26 +204,21 @@ function addAVLRightRotationChunks(chunker, event) {
                 // - just move (new) root node towards center more.
                 // New child and grandchild moved in next chunk -
                 // could do them here also but less confusing as is?
-                let pos0 = vis.graph.getRotPos(); // original position
-                let pos2 = rotateStep(pos0, 2); // previous position
-                vis.graph.setNodePosition(t2, (pos0.rX + 3*pos0.cX)/4, pos2.cY);
+                centerRotatedRoot(vis.graph, t2);
             },
             [R.key, A.key, D ? D.key : null, parentNode ? parentNode.key : null, rotateVis],
             depth
         );
 
     // if t4 is not null, let t6's left child point to t4
-    chunker.add('t6.left = t4',
+    chunker.add(bookmarks.linkTransfer,
             (vis, t6, t6r, t2, t4, p, rotate) => {
                 // vis.graph.setMoveRatio(9/10);
-                if (t4 !== null) vis.graph.addEdge(t6, t4);
+                attachRotationTransfer(vis.graph, t6, t4);
                 // set the new position of the nodes
                 // - just move (new) child node down more
                 // plus it's child also (if it has one)
-                let pos0 = vis.graph.getRotPos(); // original position
-                let pos2 = rotateStep(pos0, 2); // position after step 2
-                let deltaY = (pos2.rY - pos0.rY) / 3;
-                vis.graph.setNodePosition(t6, pos2.rX, pos2.rY + deltaY);
+                const deltaY = lowerRotatedPivot(vis.graph, t6);
                 if (t6r !== null) {
                     vis.graph.moveNodePosition(t6r, 0, deltaY);
                 }
@@ -304,21 +239,16 @@ function addAVLRightRotationChunks(chunker, event) {
         );
 
     // finalise the rotation
-    chunker.add('return t2',
+    chunker.add(bookmarks.returnRoot,
             (vis, g, p, t2, t6) => {
                 // vis.graph.clearTID();
                 vis.graph.updateTID(t2, 't2');
-                if (p !== null) {
-                    vis.graph.removeEdge(p, t6);
-                    vis.graph.addEdge(p, t2);
-                }
+                reconnectRotationParent(vis.graph, p, t6, t2);
     
                 // vis.graph.clearSelect_Circle_Count();
                 graph_clear(vis.graph);
               
-                vis.graph.setMoveRatio(3/6);
-                vis.graph.setPauseLayout(false);
-                vis.graph.layoutAVL(g, true, false);
+                finishRotationLayout(vis.graph, g, false);
                 vis.graph.rectangle_size();
             },
             [parentNode ? globalRootKey : temp.key, parentNode ? parentNode.key : null, A.key, R.key],
@@ -329,6 +259,7 @@ function addAVLRightRotationChunks(chunker, event) {
 // Translate one completed structural rotation into the existing visual stages.
 // Snapshots describe the old/new trees; this adapter never changes child pointers.
 function addAVLLeftRotationChunks(chunker, event) {
+    const bookmarks = getRotationBookmarks('left');
     const root = event.rootBefore;
     const temp = event.rootAfter;
     const pivotAfter = temp.left;
@@ -341,7 +272,7 @@ function addAVLLeftRotationChunks(chunker, event) {
     const D = A.left;
     const RL = root.left ? root.left.key : null;
     // assign the root as t2 in the pseudocode
-    chunker.add('leftRotate(t2)',
+    chunker.add(bookmarks.enter,
             (vis, r, rr, rrr) => {
     
                 graph_clear(vis.graph);
@@ -356,28 +287,17 @@ function addAVLLeftRotationChunks(chunker, event) {
         );
 
     // assign the right child of the root as t6 in the pseudocode
-    chunker.add('t6 = right(t2)',
+    chunker.add(bookmarks.identifyNewRoot,
             (vis, tt6, tt2) => {
-                // show tid of t6 on the graph
                 vis.graph.updateTID(tt6, 't6');
-    
-                // -- following code is for visualising the rotation step by step --
-                // find the position of the nodes in the graph
-                let rootNode = vis.graph.findNode(tt2);
-                let leafNode = vis.graph.findNode(tt6);
-                // store the previous height of the root node
-                let pos0 = {rX:rootNode.x, rY:rootNode.y, cX:leafNode.x, cY:leafNode.y};
-                vis.graph.setRotPos(pos0);
-                let pos = rotateStep(pos0, 1); // compute new position
-                vis.graph.setNodePosition(tt2, pos.rX, pos.rY);
-                vis.graph.setNodePosition(tt6, pos.cX, pos.cY);
+                startRotationMovement(vis.graph, tt2, tt6);
             },
             [A.key, R.key],
             depth
         );
 
     // assign the left child of t6 as t4 in the pseudocode
-    chunker.add('t4 = left(t6)',
+    chunker.add(bookmarks.identifyTransfer,
             (vis, tt2, tt6, tt4) => {
                 // show tid of t4 on the graph
                 if (tt4) {
@@ -389,28 +309,19 @@ function addAVLLeftRotationChunks(chunker, event) {
     
                 // -- following code is for visualising the rotation step by step --
                 // freeze the layout to avoid the nodes moving automatically
-                vis.graph.setPauseLayout(true);
-                // set the new position of the nodes
-                let pos0 = vis.graph.getRotPos(); // original position
-                let pos = rotateStep(pos0, 2); // compute new position
-                vis.graph.setNodePosition(tt2, pos.rX, pos.rY);
-                vis.graph.setNodePosition(tt6, pos.cX, pos.cY);
+                advanceRotationMovement(vis.graph, tt2, tt6, { pauseLayout: true });
             },
             [R.key, A.key, D ? D.key : false],
             depth
         );
 
     // let t6's left child point to t2
-    chunker.add('t6.left = t2',
+    chunker.add(bookmarks.linkPivot,
             (vis, t2, t6, t4, p, rotate) => {
                 // highlight the edge between t6 and t2
                 // if (rotate) graph_visit(vis.graph, t2, p);
                 graph_reset(vis.graph, t6, t2);
-                vis.graph.removeEdge(t2, t6);
-    
-                if (t4 !== null) {
-                    vis.graph.removeEdge(t6, t4);
-                }
+                detachRotationEdges(vis.graph, t2, t6, t4);
     
                 if (rotate) graph_reset(vis.graph, t2, null);
     
@@ -422,26 +333,21 @@ function addAVLLeftRotationChunks(chunker, event) {
                 // - just move (new) root node towards center more.
                 // New child and grandchild moved in next chunk -
                 // could do them here also but less confusing as is?
-                let pos0 = vis.graph.getRotPos(); // original position
-                let pos2 = rotateStep(pos0, 2); // previous position
-                vis.graph.setNodePosition(t6, (pos0.rX + 3*pos0.cX)/4, pos2.cY);
+                centerRotatedRoot(vis.graph, t6);
             },
             [R.key, A.key, D ? D.key : null, parentNode ? parentNode.key : null, rotateVis],
             depth
         );
 
     // if t4 is not null, let t2's right child point to t4
-    chunker.add('t2.right = t4',
+    chunker.add(bookmarks.linkTransfer,
             // reconnect the edge between t2 and t4
             (vis, t2, t2l, t6, t4, p, rotate) => {
-                if (t4 !== null) vis.graph.addEdge(t2, t4);
+                attachRotationTransfer(vis.graph, t2, t4);
                 // set the new position of the nodes
                 // - just move (new) child node down more
                 // plus it's child also (if it has one)
-                let pos0 = vis.graph.getRotPos(); // original position
-                let pos2 = rotateStep(pos0, 2); // position after step 2
-                let deltaY = (pos2.rY - pos0.rY) / 3;
-                vis.graph.setNodePosition(t2, pos2.rX, pos2.rY + deltaY);
+                const deltaY = lowerRotatedPivot(vis.graph, t2);
                 if (t2l !== null) {
                     vis.graph.moveNodePosition(t2l, 0, deltaY);
                 }
@@ -462,18 +368,13 @@ function addAVLLeftRotationChunks(chunker, event) {
         );
 
     // finalise the rotation
-    chunker.add('return t6',
+    chunker.add(bookmarks.returnRoot,
             (vis, g, p, t6, t2) => {
                 vis.graph.updateTID(t6, 't6');
-                if (p !== null) {
-                    vis.graph.removeEdge(p, t2);
-                    vis.graph.addEdge(p, t6);
-                }
+                reconnectRotationParent(vis.graph, p, t2, t6);
                 // vis.graph.clearSelect_Circle_Count();
                 graph_clear(vis.graph);
-                vis.graph.setMoveRatio(3/6);
-                vis.graph.setPauseLayout(false);
-                vis.graph.layoutAVL(g, true, false);
+                finishRotationLayout(vis.graph, g, false);
                 vis.graph.rectangle_size();
             },
             [parentNode ? globalRootKey : temp.key, parentNode ? parentNode.key : null, A.key, R.key],
@@ -515,17 +416,14 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                 vis.graph.setNodeColor(rr, colors.PATH_N);
             }
             // print the function name and the key to be inserted
-            if (isInsert)
-                vis.graph.setFunctionName(`Insert: ${k}`);
-            else
-                vis.graph.setFunctionName(`Search: ${k}`);
+            showTreeOperation(vis.graph, isInsert ? 'insert' : 'search', k);
             vis.graph.setFunctionInsertText();
             
             // Only add rectangles when recursion is expanded
             if (isRecursionExpanded(isInsert)) {
                 if (rr !== null && rr !== undefined) {
                     let nodeIds = vis.graph.getSubtreeNodes(rr);
-                    vis.graph.pushRectStack(nodeIds, `Depth ${d}`);
+                    pushTreeDepthBox(vis.graph, nodeIds, d);
                 }
                 else {
                     // add temporary node
@@ -538,7 +436,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                         vis.graph.updateHeight(k, 1);
                     }
                     // Add a rectangle for the node
-                    vis.graph.pushRectStack([k], `Depth ${d}`);
+                    pushTreeDepthBox(vis.graph, [k], d);
                     // Add a empty rectangle to display "Empty"
                     vis.graph.pushRectStack([], 'Empty');
                     vis.graph.rectangle_size();
@@ -955,8 +853,7 @@ function addSplayDepthBox(graph, frame, operationType, rotationCount, recursionB
         mode,
     )) return;
 
-    graph.pushRectStack(frame.nodeKeys, `Depth ${frame.depth}`);
-    graph.rectangle_size();
+    pushTreeDepthBox(graph, frame.nodeKeys, frame.depth, true);
     graph.setFunctionInsertText(
         ` splayCase: ${getSplayCaseLabel(frame.splayCase, rotationCount)}`,
     );
@@ -981,86 +878,23 @@ function getSplayCaseBookmark(splayCase) {
     }[splayCase] || 'case-empty';
 }
 
-function getSplayRotationBookmarks(direction) {
-    return direction === 'right'
-        ? {
-            enter: 'rightRotate(t6)',
-            identifyNewRoot: 't2 = left(t6)',
-            identifyTransfer: 't4 = right(t2)',
-            linkPivot: 't2.right = t6',
-            linkTransfer: 't6.left = t4',
-            returnRoot: 'return t2',
-        }
-        : {
-            enter: 'leftRotate(t2)',
-            identifyNewRoot: 't6 = right(t2)',
-            identifyTransfer: 't4 = left(t6)',
-            linkPivot: 't6.left = t2',
-            linkTransfer: 't2.right = t4',
-            returnRoot: 'return t6',
-        };
-}
-
-function splayRotateStep(pos0, step) {
-    const { rX, rY, cX, cY } = pos0;
-    const deltaX = rX - cX;
-    const deltaY = rY - cY;
-    let deltaX1;
-    const pos1 = { rX: 0, rY: 0, cX: 0, cY: 0 };
-
-    if (step === 1) {
-        pos1.rY = (2 * rY + cY) / 3;
-        pos1.cY = (rY + cY) / 2;
-        deltaX1 = Math.sqrt((35 / 36) * deltaY ** 2 + deltaX ** 2);
-    } else if (step === 2) {
-        pos1.rY = (rY + 2 * cY) / 3;
-        pos1.cY = rY;
-        deltaX1 = Math.sqrt((5 / 9) * deltaY ** 2 + deltaX ** 2);
-    } else {
-        console.log('Invalid rotateStep step', step);
-    }
-
-    if (rX > cX) deltaX1 = -deltaX1;
-    pos1.rX = (0.6 * rX + 0.4 * cX) - 0.4 * deltaX1;
-    pos1.cX = (0.6 * rX + 0.4 * cX) + 0.6 * deltaX1;
-
-    return pos1;
-}
-
 function startSplayRotationMovement(graph, pivotKey, newRootKey, direction) {
-    const pivot = graph.findNode(pivotKey);
-    const child = graph.findNode(newRootKey);
     const children = graph.getTree()[pivotKey];
     const outerChildKey = direction === 'right' ? children.right : children.left;
 
-    graph.setRotPos({ rX: pivot.x, rY: pivot.y, cX: child.x, cY: child.y, outerChildKey });
-    moveSplayRotationPair(graph, pivotKey, newRootKey, 1);
-}
-
-function moveSplayRotationPair(graph, pivotKey, newRootKey, step) {
-    const pos = splayRotateStep(graph.getRotPos(), step);
-
-    graph.setNodePosition(pivotKey, pos.rX, pos.rY);
-    graph.setNodePosition(newRootKey, pos.cX, pos.cY);
-
+    startRotationMovement(graph, pivotKey, newRootKey, { outerChildKey });
     graph.rectangle_size();
 }
 
 function centerSplayRotatedRoot(graph, newRootKey) {
-    const pos0 = graph.getRotPos();
-    const pos2 = splayRotateStep(pos0, 2);
-
-    graph.setNodePosition(newRootKey, (pos0.rX + 3 * pos0.cX) / 4, pos2.cY);
+    centerRotatedRoot(graph, newRootKey);
 
     graph.rectangle_size();
 }
 
 function lowerSplayRotatedPivot(graph, pivotKey) {
     const pos0 = graph.getRotPos();
-    const pos2 = splayRotateStep(pos0, 2);
-    const deltaY = (pos2.rY - pos0.rY) / 3;
-
-    graph.setNodePosition(pivotKey, pos2.rX, pos2.rY + deltaY);
+    const deltaY = lowerRotatedPivot(graph, pivotKey);
 
     if (pos0.outerChildKey !== null && pos0.outerChildKey !== undefined) {
         const tree = graph.getTree();
@@ -1091,7 +925,7 @@ export function addSplayRotationChunk(
     includeCaseStep = true,
     mode = 'operations',
 ) {
-    const bookmarks = getSplayRotationBookmarks(event.direction);
+    const bookmarks = getRotationBookmarks(event.direction);
     const rotationName = `${event.direction === 'right' ? 'Right' : 'Left'} rotation: ${event.pivotKey}`;
     const caseLabel = getSplayCaseLabel(event.splayCase, rotationCount);
     const rotationDepth = event.depth + 1;
@@ -1104,12 +938,7 @@ export function addSplayRotationChunk(
 
                 // When recursive Splay calls return, discard boxes belonging
                 // to deeper calls before animating the current rotation.
-                while (
-                    graph.rectangles
-                    && graph.rectangles.length > rotation.depth
-                ) {
-                    graph.popRectStack();
-                }
+                trimTreeDepthBoxes(graph, rotation.depth);
 
                 graph.setFunctionName(
                     `${caseLabel}: rotate ${rotation.pivotKey}`,
@@ -1133,16 +962,11 @@ export function addSplayRotationChunk(
             const graph = vis.graph;
 
             graph.setPauseLayout(true);
-            if (graph.clearTID) graph.clearTID();
+            clearTreePointerLabels(graph);
 
             // Remove traversal or previous-rotation colours before showing
             // the current rotation.
-            graph.nodes.forEach(({ id }) => {
-                graph.setNodeColor(id, undefined);
-            });
-            graph.edges.forEach(({ source, target }) => {
-                graph.setEdgeColor(source, target, undefined);
-            });
+            clearTreeHighlights(graph);
 
             if (graph.updateTID) {
                 graph.updateTID(
@@ -1200,7 +1024,7 @@ export function addSplayRotationChunk(
             } else if (graph.setTagInfo) {
                 graph.setTagInfo('t4 ');
             }
-            moveSplayRotationPair(graph, rotation.pivotKey, rotation.newRootKey, 2);
+            advanceRotationMovement(graph, rotation.pivotKey, rotation.newRootKey, { resize: true });
         },
         [event],
         rotationDepth,
@@ -1216,10 +1040,7 @@ export function addSplayRotationChunk(
                 transferredSubtreeKey,
             } = rotation;
 
-            graph.removeEdge(pivotKey, newRootKey);
-            if (transferredSubtreeKey !== null) {
-                graph.removeEdge(newRootKey, transferredSubtreeKey);
-            }
+            detachRotationEdges(graph, pivotKey, newRootKey, transferredSubtreeKey);
             graph.addEdge(newRootKey, pivotKey);
             graph.setEdgeColor(newRootKey, pivotKey, colors.ROT_E);
             centerSplayRotatedRoot(graph, newRootKey);
@@ -1231,17 +1052,7 @@ export function addSplayRotationChunk(
     chunker.add(
         bookmarks.linkTransfer,
         (vis, rotation) => {
-            if (rotation.transferredSubtreeKey !== null) {
-                vis.graph.addEdge(
-                    rotation.pivotKey,
-                    rotation.transferredSubtreeKey,
-                );
-                vis.graph.setEdgeColor(
-                    rotation.pivotKey,
-                    rotation.transferredSubtreeKey,
-                    colors.ROT_E,
-                );
-            }
+            attachRotationTransfer(vis.graph, rotation.pivotKey, rotation.transferredSubtreeKey, colors.ROT_E);
             lowerSplayRotatedPivot(vis.graph, rotation.pivotKey);
         },
         [event],
@@ -1255,16 +1066,11 @@ export function addSplayRotationChunk(
 
             // The caller receives the new subtree root at this point. Update
             // its parent edge only now, matching the rotation pseudocode.
-            if (rotation.parentKey !== null) {
-                graph.removeEdge(rotation.parentKey, rotation.pivotKey);
-                graph.addEdge(rotation.parentKey, rotation.newRootKey);
-            }
+            reconnectRotationParent(graph, rotation.parentKey, rotation.pivotKey, rotation.newRootKey);
 
             if (graph.setTagInfo) graph.setTagInfo('');
             graph.directed(true);
-            graph.setMoveRatio(3 / 6);
-            graph.setPauseLayout(false);
-            graph.layoutAVL(explicitRootKey === null ? graph.getRoot() : explicitRootKey, true);
+            finishRotationLayout(graph, explicitRootKey === null ? graph.getRoot() : explicitRootKey);
             if (graph.rectangle_size) graph.rectangle_size();
             graph.setFunctionName(
                 isSplayDepthExpanded(operationType, [], mode)
@@ -1338,12 +1144,9 @@ function addSplayCallChunks(
     function resumeCaller(bookmark, depth, frame = null) {
         chunker.add(bookmark, (vis, callerDepth, caller, target) => {
             const graph = vis.graph;
-            while (graph.rectangles && graph.rectangles.length > callerDepth) {
-                graph.popRectStack();
-            }
-            if (graph.clearTID) graph.clearTID();
-            if (graph.setTagInfo) graph.setTagInfo('');
-            graph.setFunctionName(`${operationType === 'search' ? 'Search' : 'Insert'}: ${target}`);
+            trimTreeDepthBoxes(graph, callerDepth);
+            clearTreePointerLabels(graph, true);
+            showTreeOperation(graph, operationType, target);
             graph.setFunctionInsertText(caller
                 ? ` splayCase: ${getSplayCaseLabel(caller.splayCase, rotationsByDepth[caller.depth] || 0)}`
                 : undefined);
@@ -1359,8 +1162,8 @@ function addSplayCallChunks(
 
         chunker.add('splay-enter', (vis, currentFrame, target, count, blocks) => {
             const graph = vis.graph;
-            if (graph.clearTID) graph.clearTID();
-            graph.setFunctionName(`${operationType === 'search' ? 'Search' : 'Insert'}: ${target}`);
+            clearTreePointerLabels(graph);
+            showTreeOperation(graph, operationType, target);
             graph.setFunctionInsertText();
             if (currentFrame.nodeKeys.length > 0) {
                 addSplayDepthBox(graph, currentFrame, operationType, count, blocks, mode);
@@ -1372,16 +1175,11 @@ function addSplayCallChunks(
         // Keep call entry and depth-box creation at splay-enter above.
         chunker.add('switchPath', (vis, pathNodes, target) => {
             const graph = vis.graph;
-            graph.nodes.forEach(({ id }) => graph.setNodeColor(id, undefined));
-            graph.edges.forEach(({ source, target: child }) => {
-                graph.setEdgeColor(source, child, undefined);
-            });
-            graph.setFunctionName(`${operationType === 'search' ? 'Search' : 'Insert'}: ${target}`);
-            pathNodes.forEach((nodeKey, pathIndex) => {
-                graph.setNodeColor(nodeKey, colors.PATH_N);
-                if (pathIndex > 0) {
-                    graph.setEdgeColor(pathNodes[pathIndex - 1], nodeKey, colors.PATH_E);
-                }
+            clearTreeHighlights(graph);
+            showTreeOperation(graph, operationType, target);
+            highlightTreePath(graph, pathNodes, {
+                node: colors.PATH_N,
+                edge: colors.PATH_E,
             });
         }, [path, key], depth);
         chunker.add(getSplayCaseBookmark(splayCase), (vis, currentCase, count) => {
@@ -1438,14 +1236,9 @@ function addSplayInsertionBranchChunk(chunker, event) {
         bookmark,
         (vis, insertion) => {
             const graph = vis.graph;
-            if (graph.clearTID) graph.clearTID();
+            clearTreePointerLabels(graph);
 
-            graph.nodes.forEach(({ id }) => {
-                graph.setNodeColor(id, undefined);
-            });
-            graph.edges.forEach(({ source, target }) => {
-                graph.setEdgeColor(source, target, undefined);
-            });
+            clearTreeHighlights(graph);
 
             if (insertion.rootKey !== null) {
                 const rootColor = insertion.action === 'duplicate'
@@ -1472,7 +1265,7 @@ function addSplayInsertionSteps(chunker, event, leftKey, rightKey) {
     chunker.add(`${bookmark}-save`, (vis, left, right) => {
         const graph = vis.graph;
 
-        graph.clearTID();
+        clearTreePointerLabels(graph);
 
         if (left !== null) {
             graph.updateTID(left, 'l');
@@ -1513,15 +1306,9 @@ function addSplayInsertionSteps(chunker, event, leftKey, rightKey) {
             graph.addEdge(insertedKey, right);
         }
 
-        graph.clearTID();
+        clearTreePointerLabels(graph);
 
-        graph.nodes.forEach(({ id }) => {
-            graph.setNodeColor(id, undefined);
-        });
-
-        graph.edges.forEach(({ source, target }) => {
-            graph.setEdgeColor(source, target, undefined);
-        });
+        clearTreeHighlights(graph);
 
         graph.setNodeColor(insertedKey, colors.NEW_N);
         graph.directed(true);
@@ -1538,7 +1325,7 @@ function addSplaySearchSnapshotChunk(chunker, root, target) {
             'search-return-not-found',
             (vis, searchedKey) => {
                 if (vis.graph.clearRectangles) vis.graph.clearRectangles();
-                if (vis.graph.clearTID) vis.graph.clearTID();
+                clearTreePointerLabels(vis.graph);
                 vis.graph.setFunctionName(`Not found: ${searchedKey}`);
                 vis.graph.setFunctionInsertText();
             },
@@ -1560,7 +1347,7 @@ function addSplaySearchSnapshotChunk(chunker, root, target) {
         (vis, keys, treeEdges, snapshotRoot, searchedKey, isFound) => {
             const graph = vis.graph;
             if (graph.clearRectangles) graph.clearRectangles();
-            if (graph.clearTID) graph.clearTID();
+            clearTreePointerLabels(graph);
 
             graph.setPauseLayout(true);
             [...graph.edges].forEach(({ source, target: child }) => {
@@ -1691,17 +1478,9 @@ export function createTreeInsertionController(isAVLp = false) {
                                 graph.setZoom(0.5);
                             }
                             if (graph.clearRectangles) graph.clearRectangles();
-                            if (graph.clearTID) graph.clearTID();
-                            if (graph.setTagInfo) graph.setTagInfo('');
-                            graph.nodes.forEach(({ id }) => {
-                                graph.setNodeColor(id, undefined);
-                            });
-                            graph.edges.forEach(({ source, target: child }) => {
-                                graph.setEdgeColor(source, child, undefined);
-                            });
-                            graph.setFunctionName(
-                                `${operationType === 'search' ? 'Search' : 'Insert'}: ${currentKey}`,
-                            );
+                            clearTreePointerLabels(graph, true);
+                            clearTreeHighlights(graph);
+                            showTreeOperation(graph, operationType, currentKey);
                             graph.setFunctionInsertText();
                         },
                         [type, key, operationIndex === 0],
@@ -1762,7 +1541,7 @@ export function createTreeInsertionController(isAVLp = false) {
                         const graph = vis.graph;
 
                         if (graph.clearRectangles) graph.clearRectangles();
-                        if (graph.clearTID) graph.clearTID();
+                        clearTreePointerLabels(graph);
 
                         if (insertion.action === 'empty-tree') {
                             graph.setPauseLayout(true);
@@ -1773,13 +1552,7 @@ export function createTreeInsertionController(isAVLp = false) {
                             graph.layoutAVL(snapshotRoot, true);
                         }
 
-                        graph.nodes.forEach(({ id }) => {
-                            graph.setNodeColor(id, undefined);
-                        });
-
-                        graph.edges.forEach(({ source, target }) => {
-                            graph.setEdgeColor(source, target, undefined);
-                        });
+                        clearTreeHighlights(graph);
 
                         graph.root = snapshotRoot;
                         graph.rectangle_size();
@@ -1804,7 +1577,7 @@ export function createTreeInsertionController(isAVLp = false) {
                 `Main`,
                 (vis, elements, k) => {
                     // Set initial function information
-                    vis.graph.setFunctionName(`Insert: ${k}`);
+                    showTreeOperation(vis.graph, 'insert', k);
                     vis.graph.setFunctionInsertText();
                     // initialise the tree with the first key with box
 /*
@@ -1927,7 +1700,7 @@ export function createTreeSearchController(isAVLp = false) {
                 // Remove all the recursion rectangles first
                 vis.graph.popAllRectStack();
                 vis.graph.setPauseLayout(false);
-                vis.graph.setFunctionName(`Search: ${target}`);
+                showTreeOperation(vis.graph, 'search', target);
                 vis.graph.setFunctionInsertText();
                 uncolor(vis.graph, r);
             }, [current, globalRoot], 1);
