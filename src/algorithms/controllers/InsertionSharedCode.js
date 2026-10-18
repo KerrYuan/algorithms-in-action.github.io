@@ -35,9 +35,9 @@ import GraphTracer from '../../components/DataStructures/Graph/GraphTracer';
 import Array1DTracer from '../../components/DataStructures/Array/Array1DTracer';
 import { areExpanded } from './collapseChunkPlugin';
 import SplayTree from './splaytree';
+import { insertTree, searchTree } from './treeAlgorithms';
 import {
-    TreeNode, traversePreOrder, collectSubtreeKeys, fromFlatTree,
-    createTreeSnapshot, getTreePath, rotateLeft, rotateRight,
+    TreeNode, traversePreOrder, fromFlatTree, createTreeSnapshot, getTreePath,
 } from './helpers/treeUtils';
 import { getRotationBookmarks, startRotationMovement, advanceRotationMovement, detachRotationEdges, attachRotationTransfer, reconnectRotationParent, finishRotationLayout } from './helpers/rotationAnimationHelpers';
 
@@ -58,8 +58,8 @@ const uncolor = (graph, root) => {
 let isInsert = true;
 
 // checks if either recursive call is expanded
-function isRecursionExpanded() {
-  let mode = (isInsert ? 'insertion' : 'search');
+function isRecursionExpanded(inserting = isInsert) {
+  let mode = (inserting ? 'insertion' : 'search');
   return areExpanded(['recurseLeft'], mode)
       || areExpanded(['recurseRight'], mode);
 }
@@ -127,47 +127,23 @@ let graph_clear = (graph) => {
   rotEdges = [];
 };
 
-/**
- * Insert a key into the tree recursively
- * 
-* @param {TreeNode} root the root node of the tree
-* @param {int} key the key to be inserted
-* @param {int} currIndex the index of the key in the array
-* @param {TreeNode} parentNode the parent node of the root node
-* @param {int} depth the recursive depth of this action
-* @returns {TreeNode} the new root node after the insertion
- */
-function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, depth = 1) {
-    let retVal; // return value
-
-    // Function to update the height of a node based on its children's heights (AVL only)
-    function updateHeight(root) {
-        if (isAVL && root !== null) {
-            const leftHeight = root.left ? root.left.height : 0;
-            const rightHeight = root.right ? root.right.height : 0;
-            root.height = 1 + Math.max(leftHeight, rightHeight); // pick the maximum height then add 1
-        }
-    }
-    
-
-    
-    // XXX better to rename this rightRotate...
-    /**
-     * Perform a Left-Left Case Rotation (LLCR) to balance the AVL tree
-     * @param {AVLNode} root the root node of the AVL tree
-     * @param {AVLNode} parentNode the parent node of the root node
-     * @param {int} depth the recursive depth of this action
-     * @param {boolean} rotateVis whether to highlight the rotation in the visualisation.
-     *                            The default value is true,
-     *                            should be set to false when the rotation is the middle step
-     * @returns {AVLNode} the new root node after the rotation
-     */
-    function LLCR(root, parentNode, depth, rotateVis = true) {
-        if (!isAVL) return root;
-        const bookmarks = getRotationBookmarks('right');
-    
-        // assign the root as t6 in the pseudocode
-        chunker.add(bookmarks.enter,
+// Translate one completed structural rotation into the existing visual stages.
+// Snapshots describe the old/new trees; this adapter never changes child pointers.
+function addAVLRightRotationChunks(chunker, event) {
+    const bookmarks = getRotationBookmarks('right');
+    const root = event.rootBefore;
+    const temp = event.rootAfter;
+    const pivotAfter = temp.right;
+    const parentNode = event.parentKey === null ? null : { key: event.parentKey };
+    const globalRootKey = event.globalRootKey;
+    const depth = event.depth + 1;
+    const rotateVis = event.isFinalRotation;
+    const R = root;
+    const A = root.left;
+    const D = A.right;
+    const RR = root.right ? root.right.key : null;
+    // assign the root as t6 in the pseudocode
+    chunker.add(bookmarks.enter,
             (vis, r, rl, rll) => {
                 graph_clear(vis.graph);
                 // vis.graph.clearSelect_Circle_Count();
@@ -182,12 +158,9 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             }, [root.key, root.left.key, root.left.left ? root.left.left.key : null],
             depth
         );
-    
-        let R = root; // if any doubt, refer to the charNotation above
-        let A = root.left;
-    
-        // assign the left child of the root as t2 in the pseudocode
-        chunker.add(bookmarks.identifyNewRoot,
+
+    // assign the left child of the root as t2 in the pseudocode
+    chunker.add(bookmarks.identifyNewRoot,
             (vis, tt2, tt6) => {
                 vis.graph.updateTID(tt2, 't2');
                 startRotationMovement(vis.graph, tt6, tt2);
@@ -195,10 +168,9 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             [A.key, R.key],
             depth
         );
-    
-        let D = A.right;
-        // assign the right child of t2 as t4 in the pseudocode
-        chunker.add(bookmarks.identifyTransfer,
+
+    // assign the right child of t2 as t4 in the pseudocode
+    chunker.add(bookmarks.identifyTransfer,
             (vis, tt6, tt2, tt4) => {
                 // show tid of t4 on the graph
                 if (tt4) {
@@ -215,9 +187,9 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             [R.key, A.key, D ? D.key : false],
             depth
         );
-    
-        // let t2's right child point to t6
-        chunker.add(bookmarks.linkPivot,
+
+    // let t2's right child point to t6
+    chunker.add(bookmarks.linkPivot,
             (vis, t6, t2, t4, p, rotate) => {
                 graph_reset(vis.graph, t2, t6);
                 detachRotationEdges(vis.graph, t6, t2, t4);
@@ -237,11 +209,9 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             [R.key, A.key, D ? D.key : null, parentNode ? parentNode.key : null, rotateVis],
             depth
         );
-    
-        let RR = (R.right? R.right.key: null);
-        // if t4 is not null, let t6's left child point to t4
-        // if (D) { // we now animate this step even if t4 is null
-        chunker.add(bookmarks.linkTransfer,
+
+    // if t4 is not null, let t6's left child point to t4
+    chunker.add(bookmarks.linkTransfer,
             (vis, t6, t6r, t2, t4, p, rotate) => {
                 // vis.graph.setMoveRatio(9/10);
                 attachRotationTransfer(vis.graph, t6, t4);
@@ -255,36 +225,21 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             },
             [R.key, RR, A.key, D ? D.key : null, parentNode ? parentNode.key : null, rotateVis],
             depth
-        )
-    
-        // perform the rotation in our objects
-        const temp = rotateRight(root);
-        updateHeight(root);
-        updateHeight(temp);
-    
-        // update height in the graph, it will overwrite the tid as well
-        chunker.add('recompute heights of t6 and t2', (vis, r, h1, t, h2, d, h3) => {
+        );
+
+    // update height in the graph, it will overwrite the tid as well
+    chunker.add('recompute heights of t6 and t2', (vis, r, h1, t, h2, d, h3) => {
             vis.graph.setTagInfo('');
             vis.graph.updateHeight(r, h1);
             vis.graph.updateHeight(t, h2);
             if (d !== null) vis.graph.updateHeight(d, h3);
         },
-            [root.key, root.height, temp.key, temp.height, D ? D.key : null, D ? D.height : 0],
+            [root.key, pivotAfter.height, temp.key, temp.height, D ? D.key : null, D ? D.height : 0],
             depth,
         );
-    
-        // update the parent node's child
-        if (parentNode !== null) {
-            if (temp.key < parentNode.key) {
-                parentNode.left = temp;
-            }
-            else {
-                parentNode.right = temp;
-            }
-        }
-    
-        // finalise the rotation
-        chunker.add(bookmarks.returnRoot,
+
+    // finalise the rotation
+    chunker.add(bookmarks.returnRoot,
             (vis, g, p, t2, t6) => {
                 // vis.graph.clearTID();
                 vis.graph.updateTID(t2, 't2');
@@ -296,30 +251,28 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
                 finishRotationLayout(vis.graph, g, false);
                 vis.graph.rectangle_size();
             },
-            [parentNode ? globalRoot.key : temp.key, parentNode ? parentNode.key : null, A.key, R.key],
+            [parentNode ? globalRootKey : temp.key, parentNode ? parentNode.key : null, A.key, R.key],
             depth
         );
-    
-        return temp; // new root node after the rotation
-    }
-    
-    
-    /**
-     * Perform a Right-Right Case Rotation (RRCR) to balance the AVL tree
-     * @param {AVLNode} root the root node of the AVL tree
-     * @param {AVLNode} parentNode the parent node of the root node
-     * @param {int} depth the recursive depth of this action
-     * @param {boolean} rotateVis whether to highlight the rotation in the visualisation.
-     *                            The default value is true,
-     *                            should be set to false when the rotation is the middle step
-     * @returns {AVLNode} the new root node after the rotation
-     */
-    function RRCR(root, parentNode, depth, rotateVis = true) {
-        if (!isAVL) return root;
-        const bookmarks = getRotationBookmarks('left');
-    
-        // assign the root as t2 in the pseudocode
-        chunker.add(bookmarks.enter,
+}
+
+// Translate one completed structural rotation into the existing visual stages.
+// Snapshots describe the old/new trees; this adapter never changes child pointers.
+function addAVLLeftRotationChunks(chunker, event) {
+    const bookmarks = getRotationBookmarks('left');
+    const root = event.rootBefore;
+    const temp = event.rootAfter;
+    const pivotAfter = temp.left;
+    const parentNode = event.parentKey === null ? null : { key: event.parentKey };
+    const globalRootKey = event.globalRootKey;
+    const depth = event.depth + 1;
+    const rotateVis = event.isFinalRotation;
+    const R = root;
+    const A = root.right;
+    const D = A.left;
+    const RL = root.left ? root.left.key : null;
+    // assign the root as t2 in the pseudocode
+    chunker.add(bookmarks.enter,
             (vis, r, rr, rrr) => {
     
                 graph_clear(vis.graph);
@@ -332,12 +285,9 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             }, [root.key, root.right.key, root.right.right ? root.right.right.key : null],
             depth
         );
-    
-        let R = root; // if any doubt, refer to the charNotation above
-        let A = root.right;
-    
-        // assign the right child of the root as t6 in the pseudocode
-        chunker.add(bookmarks.identifyNewRoot,
+
+    // assign the right child of the root as t6 in the pseudocode
+    chunker.add(bookmarks.identifyNewRoot,
             (vis, tt6, tt2) => {
                 vis.graph.updateTID(tt6, 't6');
                 startRotationMovement(vis.graph, tt2, tt6);
@@ -345,9 +295,9 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             [A.key, R.key],
             depth
         );
-        let D = A.left;
-        // assign the left child of t6 as t4 in the pseudocode
-        chunker.add(bookmarks.identifyTransfer,
+
+    // assign the left child of t6 as t4 in the pseudocode
+    chunker.add(bookmarks.identifyTransfer,
             (vis, tt2, tt6, tt4) => {
                 // show tid of t4 on the graph
                 if (tt4) {
@@ -364,9 +314,9 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             [R.key, A.key, D ? D.key : false],
             depth
         );
-    
-        // let t6's left child point to t2
-        chunker.add(bookmarks.linkPivot,
+
+    // let t6's left child point to t2
+    chunker.add(bookmarks.linkPivot,
             (vis, t2, t6, t4, p, rotate) => {
                 // highlight the edge between t6 and t2
                 // if (rotate) graph_visit(vis.graph, t2, p);
@@ -388,11 +338,9 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             [R.key, A.key, D ? D.key : null, parentNode ? parentNode.key : null, rotateVis],
             depth
         );
-    
-        let RL = (R.left? R.left.key: null);
-        // if t4 is not null, let t2's right child point to t4
-        // if (D) { // we now animate this step even if t4 is null
-        chunker.add(bookmarks.linkTransfer,
+
+    // if t4 is not null, let t2's right child point to t4
+    chunker.add(bookmarks.linkTransfer,
             // reconnect the edge between t2 and t4
             (vis, t2, t2l, t6, t4, p, rotate) => {
                 attachRotationTransfer(vis.graph, t2, t4);
@@ -406,37 +354,21 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             },
             [R.key, RL, A.key, D ? D.key : null, parentNode ?  parentNode.key : null, rotateVis],
             depth
-            )
-        // }
-    
-        // perform the rotation in our objects
-        const temp = rotateLeft(root);
-        updateHeight(root);
-        updateHeight(temp);
-    
-        // update height in the graph
-        chunker.add('recompute heights of t2 and t6', (vis, r, h1, t, h2, d, h3) => {
+            );
+
+    // update height in the graph
+    chunker.add('recompute heights of t2 and t6', (vis, r, h1, t, h2, d, h3) => {
             vis.graph.setTagInfo('');
             vis.graph.updateHeight(r, h1);
             vis.graph.updateHeight(t, h2);
             if (d !== null) vis.graph.updateHeight(d, h3);
         },
-            [root.key, root.height, temp.key, temp.height, D ? D.key : null, D ? D.height : 0],
+            [root.key, pivotAfter.height, temp.key, temp.height, D ? D.key : null, D ? D.height : 0],
             depth,
         );
-    
-        // update the parent node's child
-        if (parentNode !== null) {
-            if (temp.key < parentNode.key) {
-                parentNode.left = temp;
-            }
-            else {
-                parentNode.right = temp;
-            }
-        }
-    
-        // finalise the rotation
-        chunker.add(bookmarks.returnRoot,
+
+    // finalise the rotation
+    chunker.add(bookmarks.returnRoot,
             (vis, g, p, t6, t2) => {
                 vis.graph.updateTID(t6, 't6');
                 reconnectRotationParent(vis.graph, p, t2, t6);
@@ -445,82 +377,24 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
                 finishRotationLayout(vis.graph, g, false);
                 vis.graph.rectangle_size();
             },
-            [parentNode ? globalRoot.key : temp.key, parentNode ? parentNode.key : null, A.key, R.key],
+            [parentNode ? globalRootKey : temp.key, parentNode ? parentNode.key : null, A.key, R.key],
             depth
         );
-        return temp; // new root node after the rotation
-    }
-    
-    
-    /**
-     * Perform a Left-Right Case Rotation (LRCR) to balance the AVL tree
-     * 
-     * Performs a left rotation on the left child of the root node first,
-     * then performs a right rotation on the root node
-     * 
-     * @param {AVLNode} root the root node of the AVL tree
-     * @param {AVLNode} parentNode the parent node of the root node
-     * @param {int} depth the recursive depth of this action
-     * @returns {AVLNode} the new root node after the rotation
-     */
-    function LRCR(root, parentNode, depth) {
-        if (!isAVL) return root;
-        
-        // perform left rotation on the left child of the root node
-        root.left = RRCR(root.left, root, depth, false);
-    
-        // highlight the rotation in the visualisation
-        chunker.add('left(t) <- leftRotate(left(t));',
-            (vis, g, r) => {
-                vis.graph.updateHeight(r.key, r.height);
-                vis.graph.setPauseLayout(false);
-                vis.graph.layoutAVL(g, true, false);
-                vis.graph.rectangle_size();
-            }, [(parentNode !== null) ? globalRoot.key : root.key, root.left], depth);
-    
-        // chunker.add('return right rotation on t', (vis) => { }, [], depth);
-    
-        // perform right rotation on the root node
-        return LLCR(root, parentNode, depth, true);
-    }
-    
-    /**
-     * Perform a Right-Left Case Rotation (RLCR) to balance the AVL tree
-     * 
-     * Performs a right rotation on the right child of the root node first,
-     * then performs a left rotation on the root node
-     * 
-     * @param {AVLNode} root the root node of the AVL tree
-     * @param {AVLNode} parentNode the parent node of the root node
-     * @param {int} depth the recursive depth of this action
-     * @returns {AVLNode} the new root node after the rotation
-     */
-    function RLCR(root, parentNode, depth) {
-        if (!isAVL) return root;
-    
-        // perform right rotation on the right child of the root node
-        root.right = LLCR(root.right, root, depth, false);
-    
-        // highlight the rotation in the visualisation
-        chunker.add('right(t) <- rightRotate(right(t));',
-            (vis, g, r) => {
-                vis.graph.updateHeight(r.key, r.height);
-                vis.graph.setPauseLayout(false);
-                vis.graph.layoutAVL(g, true, false);
-                vis.graph.rectangle_size();
-            }, [(parentNode !== null) ? globalRoot.key : root.key, root.right], depth);
-    
-    
-        // perform left rotation on the root node
-        return RRCR(root, parentNode, depth, true);
-    }
-    
-    
-    // init global fagl used for colouring
-    rotNodes = [];
-    rotEdges = [];
-    // visualise the basic information of the insertion
-    chunker.add(`Main`,
+}
+
+
+function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
+    const { key, depth, root, globalRootKey, balance } = event;
+    const parentNode = event.parentKey === null ? null : { key: event.parentKey };
+    const isInsert = event.operation === 'insert';
+    const isAVL = event.algorithm === 'avl';
+    switch (event.type) {
+        case 'call-enter':
+            // init global fagl used for colouring
+            rotNodes = [];
+            rotEdges = [];
+            // visualise the basic information of the insertion
+            chunker.add(`Main`,
         (vis, k, d, index, r, p, rr) => {
             if (d === 1) {
                 // remove any message about ignoring
@@ -546,7 +420,7 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             vis.graph.setFunctionInsertText();
             
             // Only add rectangles when recursion is expanded
-            if (isRecursionExpanded()) {
+            if (isRecursionExpanded(isInsert)) {
                 if (rr !== null && rr !== undefined) {
                     let nodeIds = vis.graph.getSubtreeNodes(rr);
                     pushTreeDepthBox(vis.graph, nodeIds, d);
@@ -575,29 +449,16 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
         [key, depth, currIndex, root ? `...${root.key}...` : "Empty", parentNode ? parentNode.key : null, root ? root.key : null],
         depth
     );
-
-    chunker.add('if t = Empty', (vis) => null, [], depth);
-    // Search base cases:
-    // if the tree is empty set message
-    if (root === null && !isInsert) {
-        // chunker.add('if t = Empty', (vis) => null, [], depth);
-        chunker.add('return NotFound',
-            (vis, r, p) => {
-                // Pop the "Empty" rectangle
-                popAfterReturnFlag = true;
-                vis.graph.setText('Key not found');
-            },
-            [key, parentNode ? parentNode.key : null],
-            depth
-        );
-        return 'fail';
-    } else if (!isInsert && root.key == key) {
-        chunker.add('if n.key = k',
+            chunker.add('if t = Empty', (vis) => null, [], depth);
+            break;
+        case 'search-result':
+            if (event.found) {
+                chunker.add('if n.key = k',
             (vis, k) => {
                 vis.graph.setNodeColor(k, colors.FOUND_N);
             }
             , [key], depth);
-        chunker.add('return t',
+                chunker.add('return t',
             (vis, r, p) => {
                 popAfterReturnFlag = true;
                 vis.graph.setText('Key found');
@@ -607,20 +468,23 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             [key, parentNode ? parentNode.key : null],
             depth
         );
-        return 'success';
-    }
-
-    // Insertion: if the tree is empty, create a new node as the root
-    // We pop the Empty rectangle but create a new one around the new
-    // node (if it has a parent)
-    if (root === null && isInsert) {
-        // chunker.add('if t = Empty', (vis) => null, [], depth);
-
-        // Initialize the AVL tree with the first key
-        let root = createAlgorithmNode(key);
-
-        // chunker.add('create new node',
-        chunker.add('return n',
+            } else {
+                chunker.add('return NotFound',
+            (vis, r, p) => {
+                // Pop the "Empty" rectangle
+                popAfterReturnFlag = true;
+                vis.graph.setText('Key not found');
+            },
+            [key, parentNode ? parentNode.key : null],
+            depth
+        );
+            }
+            break;
+        case 'insertion':
+            // Insertion: if the tree is empty, create a new node as the root
+            // We pop the Empty rectangle but create a new one around the new
+            // node (if it has a parent)
+            chunker.add('return n',
             (vis, r, p) => {
                 // Pop the "Empty" rectangle
                 vis.graph.popRectStack();
@@ -644,34 +508,18 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             [key, parentNode ? parentNode.key : null],
             depth
         );
-
-        // update the child of the parent node
-        if (parentNode !== null) {
-            if (key < parentNode.key) {
-                parentNode.left = root;
-            } else {
-                parentNode.right = root;
-            }
-        }
-
-        return root;
-    }
-
-    chunker.add('if k < t.key', (vis) => { }, [], depth);
-
-    // For search we don't have return at end; instead we return
-    // directly from left or right recursive calls and we need to save
-    // which one so we cal unwind recursion properly (animation stops
-    // twice at recursive calls)
-    let searchBookmark;
-    if (key < root.key) {
-        chunker.add('prepare for the left recursive call', (vis) => null, [], depth);
-
-        // Recursively insert the key into the left subtree
-        retVal = insertOrSearchRec(chunker, root.left, key, currIndex, root, depth + 1);
-
-        // restore the function information after the recursive call
-        chunker.add(`recursiveCallLeft`,
+            break;
+        case 'compare':
+            chunker.add('if k < t.key', (vis) => { }, [], depth);
+            if (event.comparison > 0) { chunker.add('else if k > root(t).key', (vis) => null, [], depth); }
+            break;
+        case 'call-before':
+            if (event.direction === 'left') { chunker.add('prepare for the left recursive call', (vis) => null, [], depth); }
+            else { chunker.add('prepare for the right recursive call', (vis) => null, [], depth); }
+            break;
+        case 'call-after':
+            // restore the function information after the recursive call
+            if (event.direction === 'left') { chunker.add(`recursiveCallLeft`,
             (vis, subtree, k, r) => {
                 if (!subtree) {
                     // Search (unsuccessful): pop "Empty" rectangle
@@ -693,18 +541,8 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
                 popAfterReturnFlag = true;
             },
             [root.left, key, root],
-            depth);
-            searchBookmark = `recursiveCallLeft`;
-
-    } else if (key > root.key) {
-        chunker.add('else if k > root(t).key', (vis) => null, [], depth);
-        chunker.add('prepare for the right recursive call', (vis) => null, [], depth);
-
-        // Recursively insert the key into the right subtree
-        retVal = insertOrSearchRec(chunker, root.right, key, currIndex, root, depth + 1);
-
-        // restore the function information after the recursive call
-        chunker.add(`recursiveCallRight`,
+            depth); }
+            else { chunker.add(`recursiveCallRight`,
             (vis, subtree, k, r) => {
                 if (!subtree) {
                     // Search (unsuccessful): pop "Empty" rectangle
@@ -725,11 +563,11 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
                 popAfterReturnFlag = true;
             },
             [root.right, key, root],
-            depth);
-            searchBookmark = `recursiveCallRight`;
-    } else {
-        // Key already exists in the tree (insert)
-        chunker.add('else if k > root(t).key',
+            depth); }
+            break;
+        case 'duplicate':
+            // Key already exists in the tree (insert)
+            chunker.add('else if k > root(t).key',
             (vis) => {
                 // graph_clear(vis.graph); // clear all highlighting
                 vis.graph.setText('Duplicate key - insertion ignored');
@@ -738,67 +576,27 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             [],
             depth
         );
-        // chunker.add('return t, no change', (vis) => null, [], depth);
-        // return root;
-    }
-
-    // BST Search case: just return XXX ?need clean up
-    // BST Insert case: chunk for return statement then return
-    // AVL Insert case: fall though to balance/rotations code
-    let bookmark;
-    if (isInsert) {
-       bookmark = 'return t';
-       retVal = root
-    } else
-       return retVal;
-    if (!isAVL) {
-        // XXX only want this extra chunk for insert
-        // (may need to add contents to previous chunk
-        chunker.add(bookmark,
-            (vis, r, p) => {
-                // graph_reset(vis.graph, r, p);
-                // popAfterReturnFlag = true;
-            },
-            [root.key, parentNode ? parentNode.key : null],
-            depth
-        );
-        return retVal;
-    }
-
-    updateHeight(root);
-
-    // update height in the graph
-    chunker.add('root(t).height = 1 + max(left(t).height, right(t).height)',
+            break;
+        case 'height-update':
+            // update height in the graph
+            chunker.add('root(t).height = 1 + max(left(t).height, right(t).height)',
         (vis, r, h) => {
             vis.graph.updateHeight(r, h);
         },
         [root.key, root.height],
         depth
     );
-
-    // get balance factor of the root
-    const leftHeight = root.left ? root.left.height : 0;
-    const rightHeight = root.right ? root.right.height : 0;
-    const balance = leftHeight - rightHeight;
-
-    // update the balance factor in the graph
-    chunker.add('switch balanceCase of', (vis, r) => {
+            break;
+        case 'balance':
+            // update the balance factor in the graph
+            chunker.add('switch balanceCase of', (vis, r) => {
         vis.graph.setFunctionNode(`${r}`);
         // vis.graph.clearSelect_Circle_Count();
         // vis.graph.setSelect_Circle_Count(r);
         vis.graph.setFunctionBalance(balance);
     }, [root.key], depth);
-
-    // the rotation helper functions are deeply nested in the insert function
-    // more details can be referred to the QuickSort controller
-    // and recursionLevel in ../context/action.js
-    let rotateDepth = depth + 1;
-
-    // check the balance factor and perform rotations if necessary
-    // chunker.add('if balance > 1 && k < left(t).key', (vis) => null, [], depth);
-    if (balance > 1 && key < root.left.key) {
-        // detect LL case
-        chunker.add('perform right rotation to re-balance t',
+            switch (event.balanceCase) {
+                case 'LL': chunker.add('perform right rotation to re-balance t',
             (vis, r, b, rl, rll) => {
                 // show the rotation type and the node to be rotated
                 vis.graph.setFunctionInsertText(` balanceCase: LL`);
@@ -814,28 +612,8 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             },
             [root.key, balance, root.left.key, root.left.left ? root.left.left.key : null],
             depth
-        );
-        root = LLCR(root, parentNode, rotateDepth);
-
-        // clear the function information after the rotation
-        // and tidy up the nodes' position
-        chunker.add('return rightRotate(t)', (vis, g, r) => {
-            vis.graph.setMoveRatio(1);
-            vis.graph.updateHeight(r.key, r.height);
-            vis.graph.setFunctionNode(null);
-            // vis.graph.clearSelect_Circle_Count();
-            vis.graph.setFunctionBalance(null);
-            // vis.graph.clearSelect_Circle_Count();
-            graph_clear(vis.graph);
-            vis.graph.setPauseLayout(false);
-            vis.graph.layoutAVL(g, true, false);
-            vis.graph.rectangle_size();
-            popAfterReturnFlag = true;
-        }, [(parentNode !== null) ? globalRoot.key : root.key, root], depth);
-    } else if (balance < -1 && key > root.right.key) {
-        // chunker.add('if balance < -1 && k > right(t).key', (vis) => null, [], depth);
-        // detect RR case
-        chunker.add('perform left rotation to re-balance t',
+        ); break;
+                case 'RR': chunker.add('perform left rotation to re-balance t',
             (vis, r, b, rr, rrr) => {
                 // show the rotation type and the node to be rotated
                 vis.graph.setFunctionInsertText(` balanceCase: RR`);
@@ -850,28 +628,8 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             },
             [root.key, balance, root.right.key, root.right.right ? root.right.right.key : null],
             depth
-        );
-
-        root = RRCR(root, parentNode, rotateDepth);
-
-        // clear the function information after the rotation
-        // and tidy up the nodes' position
-        chunker.add('return leftRotate(t)', (vis, g, r) => {
-            vis.graph.setMoveRatio(1);
-            vis.graph.updateHeight(r.key, r.height);
-            vis.graph.setFunctionNode(null);
-            vis.graph.setFunctionBalance(null);
-            // vis.graph.clearSelect_Circle_Count();
-            graph_clear(vis.graph);
-            vis.graph.setPauseLayout(false);
-            vis.graph.layoutAVL(g, true, false);
-            vis.graph.rectangle_size();
-            popAfterReturnFlag = true;
-        }, [(parentNode !== null) ? globalRoot.key : root.key, root], depth);
-    } else if (balance > 1 && key > root.left.key) {
-        // chunker.add('if balance > 1 && k > left(t).key', (vis) => null, [], depth);
-        // detect LR case
-        chunker.add('perform left rotation on the left subtree',
+        ); break;
+                case 'LR': chunker.add('perform left rotation on the left subtree',
             (vis, r, b, rl, rlr) => {
                 // show the rotation type and the node to be rotated
                 vis.graph.setFunctionInsertText(` balanceCase: LR`);
@@ -886,29 +644,8 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             },
             [root.key, balance, root.left.key, root.left.right ? root.left.right.key : null],
             depth
-        );
-
-        root = LRCR(root, parentNode, rotateDepth);
-        // clear the function information after the rotation
-        chunker.add('return rightRotate(t) after leftRotate',
-            (vis, g, r) => {
-                vis.graph.setMoveRatio(1);
-                vis.graph.updateHeight(r.key, r.height);
-                vis.graph.setFunctionNode(null);
-                vis.graph.setFunctionBalance(null);
-                // vis.graph.clearSelect_Circle_Count();
-                graph_clear(vis.graph);
-                vis.graph.setPauseLayout(false);
-                vis.graph.layoutAVL(g, true, false);
-                vis.graph.rectangle_size();
-                popAfterReturnFlag = true;
-            },
-            [(parentNode !== null) ? globalRoot.key : root.key, root],
-            depth);
-    } else if (balance < -1 && key < root.right.key) {
-        // chunker.add('if balance < -1 && k < right(t).key', (vis) => null, [], depth);
-        // detect RL case
-        chunker.add('perform right rotation on the right subtree',
+        ); break;
+                case 'RL': chunker.add('perform right rotation on the right subtree',
             (vis, r, b, rr, rrl) => {
                 // show the rotation type and the node to be rotated
                 vis.graph.setFunctionInsertText(` balanceCase: RL`);
@@ -923,12 +660,78 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             },
             [root.key, balance, root.right.key, root.right.left ? root.right.left.key : null],
             depth
+        ); break;
+                default: chunker.add('case Balanced', (vis) => null, [], depth); break;
+            }
+            break;
+        case 'rotation':
+            if (event.direction === 'right') addAVLRightRotationChunks(chunker, event);
+            else addAVLLeftRotationChunks(chunker, event);
+            break;
+        case 'rotation-link': {
+            const depth = event.depth + 1;
+            // highlight the rotation in the visualisation
+            if (event.direction === 'left') { chunker.add('left(t) <- leftRotate(left(t));',
+            (vis, g, r) => {
+                vis.graph.updateHeight(r.key, r.height);
+                vis.graph.setPauseLayout(false);
+                vis.graph.layoutAVL(g, true, false);
+                vis.graph.rectangle_size();
+            }, [(parentNode !== null) ? globalRootKey : root.key, root.left], depth); }
+            else { chunker.add('right(t) <- rightRotate(right(t));',
+            (vis, g, r) => {
+                vis.graph.updateHeight(r.key, r.height);
+                vis.graph.setPauseLayout(false);
+                vis.graph.layoutAVL(g, true, false);
+                vis.graph.rectangle_size();
+            }, [(parentNode !== null) ? globalRootKey : root.key, root.right], depth); }
+            break;
+        }
+        case 'call-return':
+            if (!isInsert || event.created) break;
+            if (!isAVL) {
+                chunker.add('return t',
+            (vis, r, p) => {
+                // graph_reset(vis.graph, r, p);
+                // popAfterReturnFlag = true;
+            },
+            [root.key, parentNode ? parentNode.key : null],
+            depth
         );
-
-        root = RLCR(root, parentNode, rotateDepth);
-
-        // clear the function information after the rotation
-        chunker.add('return leftRotate(t) after rightRotate',
+                break;
+            }
+            switch (event.balanceCase) {
+                // clear the function information after the rotation
+                // and tidy up the nodes' position
+                case 'LL': chunker.add('return rightRotate(t)', (vis, g, r) => {
+            vis.graph.setMoveRatio(1);
+            vis.graph.updateHeight(r.key, r.height);
+            vis.graph.setFunctionNode(null);
+            // vis.graph.clearSelect_Circle_Count();
+            vis.graph.setFunctionBalance(null);
+            // vis.graph.clearSelect_Circle_Count();
+            graph_clear(vis.graph);
+            vis.graph.setPauseLayout(false);
+            vis.graph.layoutAVL(g, true, false);
+            vis.graph.rectangle_size();
+            popAfterReturnFlag = true;
+        }, [(parentNode !== null) ? globalRootKey : root.key, root], depth); break;
+                // clear the function information after the rotation
+                // and tidy up the nodes' position
+                case 'RR': chunker.add('return leftRotate(t)', (vis, g, r) => {
+            vis.graph.setMoveRatio(1);
+            vis.graph.updateHeight(r.key, r.height);
+            vis.graph.setFunctionNode(null);
+            vis.graph.setFunctionBalance(null);
+            // vis.graph.clearSelect_Circle_Count();
+            graph_clear(vis.graph);
+            vis.graph.setPauseLayout(false);
+            vis.graph.layoutAVL(g, true, false);
+            vis.graph.rectangle_size();
+            popAfterReturnFlag = true;
+        }, [(parentNode !== null) ? globalRootKey : root.key, root], depth); break;
+                // clear the function information after the rotation
+                case 'LR': chunker.add('return rightRotate(t) after leftRotate',
             (vis, g, r) => {
                 vis.graph.setMoveRatio(1);
                 vis.graph.updateHeight(r.key, r.height);
@@ -940,10 +743,24 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
                 vis.graph.layoutAVL(g, true, false);
                 vis.graph.rectangle_size();
                 popAfterReturnFlag = true;
-            }, [(parentNode !== null) ? globalRoot.key : root.key, root], depth);
-    } else {
-        chunker.add('case Balanced', (vis) => null, [], depth);
-        chunker.add('return t',
+            },
+            [(parentNode !== null) ? globalRootKey : root.key, root],
+            depth); break;
+                // clear the function information after the rotation
+                case 'RL': chunker.add('return leftRotate(t) after rightRotate',
+            (vis, g, r) => {
+                vis.graph.setMoveRatio(1);
+                vis.graph.updateHeight(r.key, r.height);
+                vis.graph.setFunctionNode(null);
+                vis.graph.setFunctionBalance(null);
+                // vis.graph.clearSelect_Circle_Count();
+                graph_clear(vis.graph);
+                vis.graph.setPauseLayout(false);
+                vis.graph.layoutAVL(g, true, false);
+                vis.graph.rectangle_size();
+                popAfterReturnFlag = true;
+            }, [(parentNode !== null) ? globalRootKey : root.key, root], depth); break;
+                default: chunker.add('return t',
             (vis, r, p) => {
                 vis.graph.setFunctionNode(null);
                 vis.graph.setFunctionBalance(null); // clear balance after return in switch case
@@ -952,12 +769,20 @@ function insertOrSearchRec(chunker, root, key, currIndex, parentNode = null, dep
             },
             [root.key, parentNode ? parentNode.key : null],
             depth
-        );
+        ); break;
+            }
+            break;
+        default:
+            throw new Error('Unknown tree algorithm event: ' + event.type);
     }
-    return root;
 }
-function insertOrSearch(chunker, root, key, currIndex) {
-    let r = insertOrSearchRec(chunker, root, key, currIndex, null, 1);
+
+function insertOrSearch(chunker, root, key, currIndex, { avl = false, operation = 'insert' } = {}) {
+    const isInsert = operation === 'insert';
+    const onEvent = event => addTreeAlgorithmEventChunks(chunker, event, currIndex);
+    const result = isInsert
+        ? insertTree(root, key, { avl, onEvent })
+        : searchTree(root, key, { onEvent });
     chunker.add('Done', (vis, k, r) => {
         // vis.graph.setZoom(0.55);
         // Remove all the recursion rectangles first
@@ -971,69 +796,35 @@ function insertOrSearch(chunker, root, key, currIndex) {
         // vis.graph.layoutBST(currentRootKey, true);
         // vis.graph.setFunctionName(`Search: ${target}`);
         // vis.graph.setFunctionInsertText();
-    }, [key, root ? root.key : null], 1);
-    return r;
-} 
+    }, [key, root === null ? null : root.key], 1);
+    return isInsert ? result : (result === null ? 'fail' : 'success');
+}
 
-// Compatibility export: the path is an ordinary BST traversal, not a Splay case.
+
+
+// Get the path from the root to a specific key in the splay tree
+// This function traverses the tree and
+// records the keys of the nodes along the path to the target key.
 export function getSplayTreePath(root, key) {
     return getTreePath(root, key);
 }
 
-// Describe the recursive Splay calls before the pure algorithm mutates the
-// tree. Splay recursion advances by two BST levels at a time, so these frames
-// are different from the ordinary one-node-at-a-time traversal path.
-export function getSplayRecursionFrames(root, key) {
+// Map actual algorithm call entries to the existing animation frame format.
+// The algorithm owns case/path decisions; only pseudocode block names live here.
+export function getSplayRecursionFrames(events) {
     const frames = [];
-    let current = root;
-    let depth = 1;
-    let recursionBlock = null;
-
-    while (current !== null) {
-        let splayCase = 'E';
-        let nextRoot = null;
-        let nextRecursionBlock = null;
-
-        if (key < current.key && current.left !== null) {
-            if (key < current.left.key && current.left.left !== null) {
-                splayCase = 'LL';
-                nextRoot = current.left.left;
-                nextRecursionBlock = 'LL-recurse';
-            } else if (key > current.left.key && current.left.right !== null) {
-                splayCase = 'LR';
-                nextRoot = current.left.right;
-                nextRecursionBlock = 'LR-recurse';
-            } else {
-                splayCase = 'LE';
-            }
-        } else if (key > current.key && current.right !== null) {
-            if (key > current.right.key && current.right.right !== null) {
-                splayCase = 'RR';
-                nextRoot = current.right.right;
-                nextRecursionBlock = 'RR-recurse';
-            } else if (key < current.right.key && current.right.left !== null) {
-                splayCase = 'RL';
-                nextRoot = current.right.left;
-                nextRecursionBlock = 'RL-recurse';
-            } else {
-                splayCase = 'RE';
-            }
-        }
-
+    const callers = new Map();
+    events.filter(event => event.type === 'call-enter').forEach(event => {
+        const caller = callers.get(event.depth - 1);
         frames.push({
-            depth,
-            nodeKeys: collectSubtreeKeys(current),
-            recursionBlock,
-            rootKey: current.key,
-            splayCase,
+            depth: event.depth,
+            nodeKeys: [...event.nodeKeys],
+            recursionBlock: caller ? `${caller.splayCase}-recurse` : null,
+            rootKey: event.rootKey,
+            splayCase: event.splayCase,
         });
-
-        if (nextRoot === null) break;
-        current = nextRoot;
-        depth += 1;
-        recursionBlock = nextRecursionBlock;
-    }
-
+        callers.set(event.depth, event);
+    });
     return frames;
 }
 
@@ -1337,15 +1128,10 @@ export function addSplayRotationChunks(
 // then the caller's assignment. Collapsed blocks use these levels to skip
 // the entire call, even though the Splay function itself is in Main.
 function addSplayCallChunks(
-    chunker, frames, searchPath, events, operationType, key, initialRootKey, mode,
+    chunker, events, operationType, key, initialRootKey, mode,
 ) {
-    const callFrames = frames.length > 0 ? frames : [{
-        depth: 1,
-        nodeKeys: [],
-        recursionBlock: null,
-        rootKey: null,
-        splayCase: 'E',
-    }];
+    const callEntries = events.filter(event => event.type === 'call-enter');
+    const callFrames = getSplayRecursionFrames(callEntries);
     const rotationEvents = events.filter(event => event.type === 'rotation');
     const rotationsByDepth = countSplayRotationsByDepth(rotationEvents);
     const recursiveCalls = {
@@ -1385,8 +1171,7 @@ function addSplayCallChunks(
             }
         }, [frame, key, rotationCount, recursionBlocks], depth);
 
-        const pathStart = searchPath.indexOf(frame.rootKey);
-        const path = pathStart < 0 ? [] : searchPath.slice(pathStart, pathStart + 3);
+        const path = callEntries[index].pathKeys;
         // Highlight only this call's first two edges, together in one step.
         // Keep call entry and depth-box creation at splay-enter above.
         chunker.add('switchPath', (vis, pathNodes, target) => {
@@ -1704,36 +1489,36 @@ export function createTreeInsertionController(isAVLp = false) {
                     );
 
                     if (type === 'search') {
-                        const searchPath = getSplayTreePath(root, key);
-                        const recursionFrames = getSplayRecursionFrames(root, key);
                         const initialRootKey = root === null ? null : root.key;
                         const algorithmEvents = [];
+                        const recordEvent = event => algorithmEvents.push(event);
                         root = SplayTree.search(
                             root,
                             key,
-                            event => algorithmEvents.push(event),
+                            recordEvent,
+                            recordEvent,
                         );
                         addSplayCallChunks(
-                            chunker, recursionFrames, searchPath, algorithmEvents,
+                            chunker, algorithmEvents,
                             'search', key, initialRootKey, mode,
                         );
                         addSplaySearchSnapshotChunk(chunker, root, key);
                         return;
                     }
 
-                    const searchPath = getSplayTreePath(root, key);
-                    const recursionFrames = getSplayRecursionFrames(root, key);
                     const initialRootKey = root === null ? null : root.key;
                     const algorithmEvents = [];
+                    const recordEvent = event => algorithmEvents.push(event);
                     root = SplayTree.insert(
                         root,
                         key,
-                        event => algorithmEvents.push(event),
+                        recordEvent,
+                        recordEvent,
                     );
                     // An empty-tree insertion returns before calling Splay.
-                    if (searchPath.length > 0) {
+                    if (algorithmEvents.some(event => event.type === 'call-enter')) {
                         addSplayCallChunks(
-                            chunker, recursionFrames, searchPath, algorithmEvents,
+                            chunker, algorithmEvents,
                             'insert', key, initialRootKey, mode,
                         );
                     }
@@ -1845,14 +1630,14 @@ export function createTreeInsertionController(isAVLp = false) {
             );
 
             // store the global root node
-            globalRoot = createAlgorithmNode(nodes[0]);
+            globalRoot = insertTree(null, nodes[0], { avl: isAVL });
 
             // insert the rest of the keys into the tree
             // - this builds a recursive tree structure
             // (maybe we could start with the empty tree and get rid
             // of the code for the first node above)
             for (let i = 1; i < nodes.length; i++) {
-                globalRoot = insertOrSearch(chunker, globalRoot, nodes[i], i);
+                globalRoot = insertOrSearch(chunker, globalRoot, nodes[i], i, { avl: isAVL });
             }
             // finalise the visualisation
             chunker.add(`Main`,
@@ -1922,7 +1707,7 @@ export function createTreeSearchController(isAVLp = false) {
                 vis.graph.setFunctionInsertText();
                 uncolor(vis.graph, r);
             }, [current, globalRoot], 1);
-            let r = insertOrSearch(chunker, globalRoot, target, 0);
+            let r = insertOrSearch(chunker, globalRoot, target, 0, { operation: 'search' });
         }
     };
 }

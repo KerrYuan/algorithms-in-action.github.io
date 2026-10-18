@@ -861,7 +861,7 @@ describe('SplayTreeInsertion controller', () => {
     expect(graph.setFunctionInsertText.mock.calls).toEqual([[]]);
   });
 
-  it('describes nested Splay calls two tree levels at a time', () => {
+  it('maps actual Splay call entries to nested animation frames', () => {
     const root = {
       key: 100,
       left: {
@@ -876,7 +876,10 @@ describe('SplayTreeInsertion controller', () => {
       right: null,
     };
 
-    expect(getSplayRecursionFrames(root, 10)).toEqual([
+    const calls = [];
+    SplayTree.search(root, 10, null, event => calls.push(event));
+
+    expect(getSplayRecursionFrames(calls)).toEqual([
       {
         depth: 1,
         nodeKeys: [100, 50, 25, 10],
