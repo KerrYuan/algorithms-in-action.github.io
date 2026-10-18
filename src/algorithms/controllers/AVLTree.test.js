@@ -15,6 +15,7 @@ const chunker = {
 
 describe('AVLTreeInsertion', () => {
   beforeEach(() => {
+    // Match the application's lifecycle: initialization selects AVL mode.
     AVLTreeInsertion.initVisualisers({ visualiser: {} });
   });
 

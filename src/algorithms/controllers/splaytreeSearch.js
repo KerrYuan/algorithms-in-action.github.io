@@ -7,6 +7,7 @@
  */
 
 import SplayTree from './splaytree';
+import { fromFlatTree, traversePreOrder } from './helpers/treeUtils';
 import { addSplayRotationChunks, getSplayTreePath } from './InsertionSharedCode';
 
 export default {
@@ -37,17 +38,7 @@ export default {
         const flatTree = visualiser.graph.instance.getTree();
         const rootId = visualiser.graph.instance.getRoot();
 
-        // helper: build a nested SplayTree Node structure from the flat tree
-        function buildNested(id) {
-            if (id === undefined || id === null) return null;
-            const node = SplayTree.newNode(id);
-            const entry = flatTree[id] || {};
-            if (entry.left) node.left = buildNested(entry.left);
-            if (entry.right) node.right = buildNested(entry.right);
-            return node;
-        }
-
-        const nestedRoot = buildNested(rootId);
+        const nestedRoot = fromFlatTree(rootId, flatTree, SplayTree.newNode);
         const searchPath = getSplayTreePath(nestedRoot, target);
 
         searchPath.forEach((nodeKey, index) => {
@@ -94,19 +85,10 @@ export default {
         const oldEdges = g.edges ? [...g.edges] : [];
         oldEdges.forEach(e => g.removeEdge(e.source, e.target));
 
-        // traverse nested tree and add edges
-        function addEdges(node) {
-            if (!node) return;
-            if (node.left) {
-                g.addEdge(node.key, node.left.key);
-                addEdges(node.left);
-            }
-            if (node.right) {
-                g.addEdge(node.key, node.right.key);
-                addEdges(node.right);
-            }
-        }
-        if (newRoot) addEdges(newRoot);
+        // Keep depth-first edge insertion order while sharing the traversal.
+        traversePreOrder(newRoot, (node, parent) => {
+            if (parent) g.addEdge(parent.key, node.key);
+        });
 
         // layout the tree with the new root
         if (newRoot) {

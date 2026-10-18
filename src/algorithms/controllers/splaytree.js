@@ -17,13 +17,10 @@
  * behaviour remains independently testable.
  */
 
-export class Node {
-  constructor(key) {
-    this.key = key;
-    this.left = null;
-    this.right = null;
-  }
-}
+import { TreeNode as Node, rotateLeft, rotateRight } from './helpers/treeUtils';
+
+// Preserve the public Splay node constructor while sharing its representation.
+export { Node };
 
 class SplayTree {
   static newNode(key) {
@@ -43,17 +40,11 @@ class SplayTree {
   }
 
   static rightRotate(root) {
-    const newRoot = root.left;
-    root.left = newRoot.right;
-    newRoot.right = root;
-    return newRoot;
+    return rotateRight(root);
   }
 
   static leftRotate(root) {
-    const newRoot = root.right;
-    root.right = newRoot.left;
-    newRoot.left = root;
-    return newRoot;
+    return rotateLeft(root);
   }
 
   static rightRotateWithEvent(root, onEvent, eventDetails) {
