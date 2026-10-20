@@ -45,6 +45,8 @@ export { default as test_pseudocode } from './test_pseudocode.js';
 
 export { default as floydwarsh } from './floydwarsh.js';
 
+export { default as splaytree } from './splaytree.js';
+
 export { default as splaytreeInsertion } from './splaytreeInsertion.js';
 
 export { default as splaytreeSearch } from './splaytreeSearch.js';

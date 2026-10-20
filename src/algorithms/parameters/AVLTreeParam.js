@@ -95,13 +95,10 @@ function AVLTParam({ mode, list, value }) {
 
     if (valid) {
       const target = parseInt(inputValue, 10);
+      const visualiser = algorithm.chunker?.visualisers;
+      const graph = visualiser?.graph?.instance;
 
-      if (
-        algorithm.hasOwnProperty('visualisers') &&
-        !algorithm.visualisers.graph.instance.isEmpty()
-      ) {
-        const visualiser = algorithm.chunker.visualisers;
-
+      if (graph && !graph.isEmpty()) {
         dispatch(GlobalActions.RUN_ALGORITHM, {
           name: 'AVLTree',
           mode: 'search',
