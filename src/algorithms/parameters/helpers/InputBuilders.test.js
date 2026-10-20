@@ -2,6 +2,7 @@
 import {
   genUniqueRandSearchList,
   sortAndInterleaveSearches,
+  balancedAndInterleaveSearches,
 } from './InputBuilders';
 
 describe('genUniqueRandSearchList', () => {
@@ -86,7 +87,7 @@ describe('balancedAndInterleaveSearches', () => {
 
     expect(result.filter(
       (operation) => !String(operation).startsWith('?')
-    )).toEqual(['3', '-2', '10']);
+    )).toEqual([3, -2, 10]);
 
     expect(result.filter(
       (operation) => String(operation).startsWith('?')
@@ -95,7 +96,7 @@ describe('balancedAndInterleaveSearches', () => {
     expect(operations).toEqual(originalOperations);
   });
 
-  test('allows searches before the first insert and after the last insert', () => {
+  test('interleaves searches in their original order with balanced numeric inserts', () => {
     jest.spyOn(Math, 'random')
       .mockReturnValueOnce(0.9)
       .mockReturnValue(0);
@@ -104,7 +105,7 @@ describe('balancedAndInterleaveSearches', () => {
       3, '?3', 1, '?9', 2,
     ]);
 
-    expect(result).toEqual(['?3', 2, 1, 3, '?9']);
+    expect(result).toEqual([2, '?3', 1, '?9', 3]);
   });
 
   test('accepts a comma-separated operation string', () => {
@@ -112,6 +113,6 @@ describe('balancedAndInterleaveSearches', () => {
 
     expect(
       balancedAndInterleaveSearches('4,?4,1')
-    ).toEqual(['1', '4', '?4']);
+    ).toEqual([4, '?4', 1]);
   });
 });

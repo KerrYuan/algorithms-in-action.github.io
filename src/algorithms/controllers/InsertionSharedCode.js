@@ -1921,6 +1921,7 @@ export function createTreeInsertionController(isAVLp = false) {
             visualiser,
             target,
             mode = 'operations',
+            initialRoot = null,
         }) {
             isInsert = true;
             const operationList = isSplayController
@@ -1956,7 +1957,7 @@ export function createTreeInsertionController(isAVLp = false) {
             // Splay insertion stays in the pure data structure. Visual updates
             // are connected incrementally after the algorithm call is verified.
             if (isSplayController) {
-                let root = null;
+                let root = initialRoot;
 
                 operationList.forEach((operation, operationIndex) => {
                     const { type, value: key } = operation;

@@ -92,11 +92,9 @@ function BSTrecParam({ mode, list, value }) {
     if (valid) {
       const target = parseInt(inputValue, 10);
 
-      if (
-        algorithm.hasOwnProperty('visualisers') &&
-        !algorithm.visualisers.graph.instance.isEmpty()
-      ) {
-        const visualiser = algorithm.chunker.visualisers;
+      const visualiser = algorithm.chunker?.visualisers;
+      const graph = visualiser?.graph?.instance;
+      if (graph && !graph.isEmpty()) {
 
         dispatch(GlobalActions.RUN_ALGORITHM, {
           name: 'BSTrec',
