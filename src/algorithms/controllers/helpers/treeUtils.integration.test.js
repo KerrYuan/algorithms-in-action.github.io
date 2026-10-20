@@ -1,4 +1,5 @@
 /* eslint-disable no-undef */
+import Chunker from '../../../context/chunker';
 import GraphTracer from '../../../components/DataStructures/Graph/GraphTracer';
 import SplayTreeSearch from '../splaytreeSearch';
 import { Node, default as SplayTree } from '../splaytree';
@@ -57,15 +58,17 @@ it.each([
   [0, { 0: {} }, { 0: {} }],
 ])('searches zero using the legacy Splay controller from root %s', (rootKey, flat, expected) => {
   const visualiser = makeVisualiser(rootKey, flat);
-  const graph = visualiser.graph.instance;
-  const chunks = [];
-  const result = SplayTreeSearch.run({ add: (bookmark, callback, args = []) => chunks.push({ bookmark, callback, args }) }, {
-    visualiser, target: 0,
-  });
+  const params = { visualiser, target: 0 };
+  const chunker = new Chunker(() => SplayTreeSearch.initVisualisers(params));
+  const result = SplayTreeSearch.run(chunker, params);
   expect(result).toBe('success');
+  expect(visualiser.graph.instance.getRoot()).toBe(rootKey);
+  expect(visualiser.graph.instance.getTree()).toEqual(flat);
+  chunker.chunks.forEach(() => chunker.next());
+  const graph = chunker.visualisers.graph.instance;
   expect(graph.getRoot()).toBe(0);
   expect(graph.getTree()).toEqual(expected);
-  expect(chunks[chunks.length - 1].bookmark).toBe('return t');
+  expect(chunker.chunks[chunker.chunks.length - 1].bookmark).toBe('search-return-found');
 });
 
 it('keeps the exported Splay path helper compatible', () => {
