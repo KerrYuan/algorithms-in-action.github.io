@@ -8,6 +8,7 @@
 
 import cloneDeep from 'lodash/cloneDeep';
 import SplayTree from './splaytree';
+import { fromFlatTree } from './helpers/treeUtils';
 import { createTreeInsertionController } from './InsertionSharedCode';
 
 const controller = createTreeInsertionController('splay');
@@ -28,18 +29,9 @@ export default {
         const graph = visualiser.graph.instance;
         const flatTree = graph.getTree();
 
-        function buildNested(id) {
-            if (id === undefined || id === null) return null;
-            const node = SplayTree.newNode(id);
-            const entry = flatTree[id] || {};
-            node.left = buildNested(entry.left);
-            node.right = buildNested(entry.right);
-            return node;
-        }
-
         const root = controller.run(chunker, {
             operations: [{ type: 'search', value: target }],
-            initialRoot: buildNested(graph.getRoot()),
+            initialRoot: fromFlatTree(graph.getRoot(), flatTree, SplayTree.newNode),
             mode: 'search',
         });
 
