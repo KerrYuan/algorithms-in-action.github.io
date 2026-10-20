@@ -48,26 +48,26 @@ import { clearTreeHighlights, highlightTreePath, centerRotatedRoot, lowerRotated
 // scheme interface - worth cleaning up
 import {BSTColors as colors} from './BSTColors';
 
+import { getTreeAnimationState, resetTreeAnimationState } from './helpers/treeAnimationState';
+
 // remove any highlighting etc from tree XXX also in AVLTreeSearch.js
+
 const uncolor = (graph, root) => {
     traversePreOrder(root, node => graph.setNodeColor(node.key, undefined));
 };
 
 
 // Global flag for insert/search (set when controller init is run)
-let isInsert = true;
 
 // checks if either recursive call is expanded
-function isRecursionExpanded(inserting = isInsert) {
+function isRecursionExpanded(inserting = true) {
   let mode = (inserting ? 'insertion' : 'search');
   return areExpanded(['recurseLeft'], mode)
       || areExpanded(['recurseRight'], mode);
 }
 
-let globalRoot;
-let isAVL = false; // flag for AVLT/BST (needed for height)
 // Algorithm-specific metadata stays here, outside the shared structural helpers.
-function createAlgorithmNode(key) {
+function createAlgorithmNode(key, isAVL) {
     const node = new TreeNode(key);
     if (isAVL) node.height = 1;
     return node;
@@ -79,7 +79,6 @@ function createAlgorithmNode(key) {
 // backwards re-executes from the start so it seems to work but is
 // fagile (and the initial value of false may not be the initial value
 // when re-executing).
-let popAfterReturnFlag = false;
 
 // Previously this code used the old colour scheme and had things like
 // vis.graph.visit(rl,r) that coloured two nodes plus the edge between
@@ -89,31 +88,30 @@ let popAfterReturnFlag = false;
 // XXX best rename now.
 // We need some global variables to keep track of what things have been
 // coloured - Boo, hiss   XXX would be good to clean this up
-let newNode,
-  rotNodes = [],
-  rotEdges = [];
 
 // n2 -> n1 is involved in rotation - colour nodes and edge
 // (leave newNode as is)
 let graph_visit = (graph, n1, n2) => {
-  if (n1 !== newNode) {
+  const state = getTreeAnimationState(graph);
+  if (n1 !== state.newNode) {
     graph.setNodeColor(n1, colors.ROT_N);
-    rotNodes.push(n1);
+    state.rotNodes.push(n1);
   }
-  if (n2 !== newNode) {
+  if (n2 !== state.newNode) {
     graph.setNodeColor(n2, colors.ROT_N);
-    rotNodes.push(n2);
+    state.rotNodes.push(n2);
   }
   graph.setEdgeColor(n2, n1, colors.ROT_E);
-  rotEdges.push([n2,n1]);
+  state.rotEdges.push([n2,n1]);
 };
 
 // reset colours set above
 let graph_reset = (graph, n1, n2) => {
-  if (n1 !== newNode) {
+  const state = getTreeAnimationState(graph);
+  if (n1 !== state.newNode) {
     graph.setNodeColor(n1, undefined);
   }
-  if (n2 !== newNode) {
+  if (n2 !== state.newNode) {
     graph.setNodeColor(n2, undefined);
   }
   graph.setEdgeColor(n2, n1, undefined);
@@ -121,10 +119,11 @@ let graph_reset = (graph, n1, n2) => {
 
 // clears all the colouring set above
 let graph_clear = (graph) => {
-  rotNodes.forEach(n => {graph.setNodeColor(n, undefined);});
-  rotNodes = [];
-  rotEdges.forEach(n => {graph.setEdgeColor(n[0], n[1], undefined);});
-  rotEdges = [];
+  const state = getTreeAnimationState(graph);
+  state.rotNodes.forEach(n => {graph.setNodeColor(n, undefined);});
+  state.rotNodes = [];
+  state.rotEdges.forEach(n => {graph.setEdgeColor(n[0], n[1], undefined);});
+  state.rotEdges = [];
 };
 
 // Translate one completed structural rotation into the existing visual stages.
@@ -391,8 +390,6 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
     switch (event.type) {
         case 'call-enter':
             // init global fagl used for colouring
-            rotNodes = [];
-            rotEdges = [];
             // visualise the basic information of the insertion
             chunker.add(`Main`,
         (vis, k, d, index, r, p, rr) => {
@@ -405,10 +402,10 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                 // this for now)
                 vis.graph.setText('');
             }
-            if (popAfterReturnFlag) { // Not needed here???
+            if (getTreeAnimationState(vis.graph).popAfterReturnFlag) { // Not needed here???
                 vis.graph.popRectStack();
                 vis.graph.setNodeColor(rr, undefined);
-                popAfterReturnFlag = false;
+                getTreeAnimationState(vis.graph).popAfterReturnFlag = false;
             }
             if (rr !== null && rr !== undefined) {
                 // visit from root to root, to just highlight the current node, without highlighting the edge
@@ -460,7 +457,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
             , [key], depth);
                 chunker.add('return t',
             (vis, r, p) => {
-                popAfterReturnFlag = true;
+                getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
                 vis.graph.setText('Key found');
                 // XXX want to highlight node here (also highlight
                 // inserted nodes); remove highlight at end of insert
@@ -472,7 +469,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                 chunker.add('return NotFound',
             (vis, r, p) => {
                 // Pop the "Empty" rectangle
-                popAfterReturnFlag = true;
+                getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
                 vis.graph.setText('Key not found');
             },
             [key, parentNode ? parentNode.key : null],
@@ -490,7 +487,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                 vis.graph.popRectStack();
                 vis.graph.setPauseLayout(false);
                 vis.graph.addNode(r, r);
-                newNode = r;
+                getTreeAnimationState(vis.graph).newNode = r;
                 vis.graph.setNodeColor(r, colors.NEW_N);
                 if (isAVL) {
                     vis.graph.updateHeight(r, 1);
@@ -503,7 +500,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                     vis.graph.removeEdge(p, r);
                 }
                 vis.graph.rectangle_size();
-                popAfterReturnFlag = true;
+                getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
             },
             [key, parentNode ? parentNode.key : null],
             depth
@@ -531,14 +528,14 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                 }
                 vis.graph.setPauseLayout(false);
                 vis.graph.setFunctionInsertText();
-                if (popAfterReturnFlag) {
+                if (getTreeAnimationState(vis.graph).popAfterReturnFlag) {
                     vis.graph.popRectStack();
                     if (subtree && subtree.key !== k)
                         vis.graph.setNodeColor(subtree.key, undefined);
                     vis.graph.rectangle_size();
-                    popAfterReturnFlag = false;
+                    getTreeAnimationState(vis.graph).popAfterReturnFlag = false;
                 }
-                popAfterReturnFlag = true;
+                getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
             },
             [root.left, key, root],
             depth); }
@@ -553,14 +550,14 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                 }
                 vis.graph.setPauseLayout(false);
                 vis.graph.setFunctionInsertText();
-                if (popAfterReturnFlag) {
+                if (getTreeAnimationState(vis.graph).popAfterReturnFlag) {
                     vis.graph.popRectStack();
                     if (subtree && subtree.key !== k)
                         vis.graph.setNodeColor(subtree.key, undefined);
                     vis.graph.rectangle_size();
-                    popAfterReturnFlag = false;
+                    getTreeAnimationState(vis.graph).popAfterReturnFlag = false;
                 }
-                popAfterReturnFlag = true;
+                getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
             },
             [root.right, key, root],
             depth); }
@@ -714,7 +711,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
             vis.graph.setPauseLayout(false);
             vis.graph.layoutAVL(g, true, false);
             vis.graph.rectangle_size();
-            popAfterReturnFlag = true;
+            getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
         }, [(parentNode !== null) ? globalRootKey : root.key, root], depth); break;
                 // clear the function information after the rotation
                 // and tidy up the nodes' position
@@ -728,7 +725,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
             vis.graph.setPauseLayout(false);
             vis.graph.layoutAVL(g, true, false);
             vis.graph.rectangle_size();
-            popAfterReturnFlag = true;
+            getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
         }, [(parentNode !== null) ? globalRootKey : root.key, root], depth); break;
                 // clear the function information after the rotation
                 case 'LR': chunker.add('return rightRotate(t) after leftRotate',
@@ -742,7 +739,7 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                 vis.graph.setPauseLayout(false);
                 vis.graph.layoutAVL(g, true, false);
                 vis.graph.rectangle_size();
-                popAfterReturnFlag = true;
+                getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
             },
             [(parentNode !== null) ? globalRootKey : root.key, root],
             depth); break;
@@ -758,14 +755,14 @@ function addTreeAlgorithmEventChunks(chunker, event, currIndex) {
                 vis.graph.setPauseLayout(false);
                 vis.graph.layoutAVL(g, true, false);
                 vis.graph.rectangle_size();
-                popAfterReturnFlag = true;
+                getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
             }, [(parentNode !== null) ? globalRootKey : root.key, root], depth); break;
                 default: chunker.add('return t',
             (vis, r, p) => {
                 vis.graph.setFunctionNode(null);
                 vis.graph.setFunctionBalance(null); // clear balance after return in switch case
                 // graph_reset(vis.graph, r, p); // clear all highlighting
-                popAfterReturnFlag = true;
+                getTreeAnimationState(vis.graph).popAfterReturnFlag = true;
             },
             [root.key, parentNode ? parentNode.key : null],
             depth
@@ -1387,12 +1384,12 @@ function addSplaySearchSnapshotChunk(chunker, root, target) {
 // If isInsert = true 
 export function createTreeInsertionController(isAVLp = false) {
     const isSplayController = (isAVLp === 'splay');
+    const isAVL = (isAVLp === true);
     // const treeType = isAVL ? 'AVL' : 'BST'; // no longer used
     // const functionPrefix = isAVL ? 'AVLT' : 'BST';
     return {
         // visualiser used only for insert
         initVisualisers({ visualiser }) {
-            isAVL = (isAVLp === true);
             return {
                 graph: {
                     // XXX specialise "Tree" label???
@@ -1417,7 +1414,6 @@ export function createTreeInsertionController(isAVLp = false) {
             mode = 'operations',
             initialRoot = null,
         }) {
-            isInsert = true;
             const operationList = isSplayController
                 ? (
                     Array.isArray(operations)
@@ -1631,7 +1627,7 @@ export function createTreeInsertionController(isAVLp = false) {
             );
 
             // store the global root node
-            globalRoot = insertTree(null, nodes[0], { avl: isAVL });
+            let globalRoot = insertTree(null, nodes[0], { avl: isAVL });
 
             // insert the rest of the keys into the tree
             // - this builds a recursive tree structure
@@ -1669,9 +1665,9 @@ export function createTreeSearchController(isAVLp = false) {
     return {
         // visualiser used only for insert
         initVisualisers({ visualiser }) {
-            isAVL = isAVLp;
             // clear existing trace, if any
-            graph_clear(visualiser.graph);
+            graph_clear(visualiser.graph.instance);
+            resetTreeAnimationState(visualiser.graph.instance);
             return {
                 graph: {
                     instance: visualiser.graph.instance,
@@ -1689,12 +1685,11 @@ export function createTreeSearchController(isAVLp = false) {
         // nodes used for insert; visualiser and target used for search
         run(chunker, { visualiser, target }) {
 
-            isInsert = false;
             // get whole tree from the visualiser
             const flatTree = visualiser.graph.instance.getTree();
             let rootKey = visualiser.graph.instance.getRoot();
 
-            globalRoot = fromFlatTree(rootKey, flatTree, createAlgorithmNode);
+            const globalRoot = fromFlatTree(rootKey, flatTree, key => createAlgorithmNode(key, isAVLp));
 
             let current = rootKey;
             let parent = null;
